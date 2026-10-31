@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PackTrack สถานีแพค</title>
+<style>
+  :root { --bg:#f3f4f6; --card:#fff; --text:#111827; --muted:#6b7280; --line:#e5e7eb; --accent:#1f3864; --ok:#16a34a; --warn:#d97706; --bad:#dc2626; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 "Sarabun","Noto Sans Thai",Arial,sans-serif; }
+  header { background:var(--accent); color:#fff; padding:10px 16px; display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header b { font-size:17px; }
+  header .sp { flex:1; }
+  header button { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.5); }
+  button { font:inherit; border-radius:8px; border:1px solid var(--line); background:#fff; padding:8px 14px; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.danger { background:var(--bad); color:#fff; border-color:var(--bad); }
+  button:disabled { opacity:.5; cursor:default; }
+  input, select { font:inherit; padding:8px 10px; border:1px solid #cbd5e1; border-radius:8px; width:100%; background:#fff; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  .hidden { display:none !important; }
+  .center { max-width:420px; margin:40px auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .row { display:flex; gap:8px; margin-top:12px; }
+  .main { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:14px; padding:14px; }
+  @media (max-width: 900px) { .main { grid-template-columns:1fr; } }
+  .stage { position:relative; background:#000; border-radius:10px; overflow:hidden; aspect-ratio:16/9; }
+  .stage video { width:100%; height:100%; object-fit:contain; display:block; }
+  .rec { position:absolute; top:12px; right:12px; background:var(--bad); color:#fff; font-weight:700; padding:4px 12px; border-radius:999px; }
+  .rec::before { content:"● "; }
+  .stage .code { position:absolute; left:12px; bottom:12px; background:rgba(0,0,0,.6); color:#fff; padding:6px 12px; border-radius:8px; font-size:22px; font-weight:700; }
+  .side { display:flex; flex-direction:column; gap:12px; }
+  #scan { font-size:22px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; }
+  .banner { border-radius:8px; padding:10px 12px; font-size:14px; }
+  .banner.warn { background:#fef3c7; border:1px solid #f59e0b; }
+  .banner.bad { background:#fee2e2; border:1px solid #ef4444; }
+  .plats { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:8px; }
+  .plats button.sel { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .list { max-height:360px; overflow:auto; }
+  .item { border-bottom:1px solid var(--line); padding:8px 0; display:flex; gap:8px; align-items:center; }
+  .item .t { flex:1; min-width:0; }
+  .item .t b { word-break:break-all; }
+  .pill { font-size:12px; border-radius:999px; padding:1px 8px; white-space:nowrap; }
+  .pill.wait { background:#e5e7eb; } .pill.up { background:#dbeafe; } .pill.done { background:#dcfce7; } .pill.err { background:#fee2e2; } .pill.del { background:#f3f4f6; color:var(--muted); text-decoration:line-through; }
+  .item button { padding:4px 8px; font-size:13px; }
+  .item button.del { color:var(--bad); border-color:#fca5a5; }
+  #toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#111827; color:#fff; padding:10px 18px; border-radius:8px; z-index:9; max-width:90vw; }
+  canvas#cv { position:absolute; left:-99999px; top:0; }
+  .err { color:var(--bad); font-size:14px; margin-top:8px; }
+</style>
+</head>
+<body>
+
+<header id="hdr" class="hidden">
+  <b>PackTrack สถานีแพค</b>
+  <span id="hdrCtx" class="muted" style="color:#dbeafe"></span>
+  <span class="sp"></span>
+  <span id="hdrQueue"></span>
+  <span id="hdrUser"></span>
+  <button id="btnSetup">ตั้งค่า</button>
+  <button id="btnLogout">ออกจากระบบ</button>
+</header>
+
+<!-- เข้าสู่ระบบ -->
+<section id="vLogin" class="center hidden">
+  <div class="card">
+    <h2 style="margin-top:0">เข้าสู่ระบบ</h2>
+    <div id="apiBox">
+      <label>URL ของ Apps Script (Web app /exec)</label>
+      <input id="inApi" placeholder="https://script.google.com/macros/s/.../exec">
+    </div>
+    <label>อีเมล</label>
+    <input id="inEmail" type="email" autocomplete="email">
+    <div class="row"><button class="primary" id="btnOtp">ส่งรหัสทางอีเมล</button></div>
+    <div id="otpBox" class="hidden">
+      <label>รหัส 6 หลักจากอีเมล</label>
+      <input id="inOtp" inputmode="numeric" maxlength="6">
+      <div class="row"><button class="primary" id="btnVerify">เข้าสู่ระบบ</button></div>
+    </div>
+    <div id="loginErr" class="err"></div>
+  </div>
+</section>
+
+<!-- ตั้งค่าสถานี -->
+<section id="vSetup" class="center hidden">
+  <div class="card">
+    <h2 style="margin-top:0">ตั้งค่าสถานี</h2>
+    <label>บริษัท</label><select id="selCompany"></select>
+    <label>สาขา</label><select id="selBranch"></select>
+    <label>สถานี</label><select id="selStation"></select>
+    <label>ความละเอียดวิดีโอ</label>
+    <select id="selRes"><option value="720">720p (แนะนำ ไฟล์เล็ก)</option><option value="1080">1080p (ชัดกว่า ไฟล์ใหญ่ขึ้นประมาณ 2 เท่า)</option></select>
+    <label>กล้อง</label><select id="selCam"></select>
+    <div class="row"><button class="primary" id="btnStart">เริ่มใช้งาน</button></div>
+    <div id="setupErr" class="err"></div>
+  </div>
+</section>
+
+<!-- หน้าสถานี -->
+<section id="vStation" class="main hidden">
+  <div>
+    <div class="stage">
+      <video id="video" muted playsinline autoplay></video>
+      <div id="recBadge" class="rec hidden">REC 00:00</div>
+      <div id="recCode" class="code hidden"></div>
+    </div>
+    <p class="muted">สแกนบาร์โค้ดเพื่อเริ่มอัด · สแกนกล่องถัดไป กดปุ่มหยุด กด Esc หรือสแกนบาร์โค้ด STOP เพื่อหยุด · ตัดอัตโนมัติเมื่อเกิน 10 นาที</p>
+  </div>
+  <div class="side">
+    <div class="card">
+      <label style="margin-top:0">สแกนบาร์โค้ด</label>
+      <input id="scan" autocomplete="off" spellcheck="false">
+      <div class="row">
+        <button class="danger" id="btnStop" disabled>หยุดอัด</button>
+        <button id="btnCancel" disabled>ยกเลิกการอัดนี้</button>
+      </div>
+    </div>
+
+    <div id="invalidBox" class="banner bad hidden">
+      <b>บาร์โค้ดไม่ตรงรูปแบบเลข track ที่รู้จัก</b>
+      <div class="muted">อาจสแกนผิดอัน เช่น รหัสคัดแยกของขนส่ง</div>
+      <div class="row"><button id="btnKeep">ใช้เลขนี้ต่อ</button><button class="danger" id="btnDiscard">ยกเลิก</button></div>
+    </div>
+
+    <div id="repeatBox" class="banner warn hidden"></div>
+
+    <div id="platBox" class="card hidden">
+      <b>ตรวจสอบแพลตฟอร์มและการจัดส่ง</b> <span class="muted">(เลขใหม่ · กด Enter เพื่อยืนยัน)</span>
+      <label>แพลตฟอร์ม</label>
+      <div id="plats" class="plats"></div>
+      <label>การจัดส่ง</label>
+      <div id="cars" class="plats"></div>
+      <label>ส่งแก้ของ track เดิม (ไม่บังคับ)</label>
+      <input id="inParent" placeholder="สแกนหรือพิมพ์เลข track เดิม" autocomplete="off">
+      <div class="row"><button class="primary" id="btnPlatOk">ยืนยัน</button></div>
+    </div>
+
+    <div class="card">
+      <b>รายการล่าสุด</b> <span class="muted" id="queueInfo"></span>
+      <div id="recent" class="list"></div>
+    </div>
+  </div>
+</section>
+
+<canvas id="cv"></canvas>
+<div id="toast" class="hidden"></div>
+
+<script>
+'use strict';
+
+// ------------------------------------------------------------------ config
+const DEFAULT_API_URL = 'https://script.google.com/a/macros/ekenko.co.th/s/AKfycbw-ZkJTo5LYeyNmwSFk-OHe7g8twc4J6_6QUxscY_eS2wsnVo_gN-hxUYstDcSri-V8Ww/exec';
+const BITRATE = { 720: 1500000, 1080: 3000000 };
+const SIZE = { 720: [1280, 720], 1080: [1920, 1080] };
+const MAX_MS = 10 * 60 * 1000;
+const CHUNK = 256 * 1024 * 20; // 5 MB (ต้องเป็นทวีคูณของ 256 KB)
+const FPS = 25;
+const STOP_CODES = ['STOP', '#STOP'];
+
+// ------------------------------------------------------------------ storage
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('pt_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('pt_' + k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem('pt_' + k); } catch (e) {} },
+};
+
+// คิววิดีโอเก็บใน IndexedDB เพื่อไม่ให้หายถ้าปิดหน้าหรือเน็ตหลุด (ถ้าใช้ไม่ได้จะเก็บในหน่วยความจำ)
+const Q = (function () {
+  let dbp = null;
+  const mem = new Map();
+  function open() {
+    if (dbp) return dbp;
+    dbp = new Promise(function (resolve) {
+      try {
+        const r = indexedDB.open('packtrack', 1);
+        r.onupgradeneeded = function () { r.result.createObjectStore('queue', { keyPath: 'id' }); };
+        r.onsuccess = function () { resolve(r.result); };
+        r.onerror = function () { resolve(null); };
+      } catch (e) { resolve(null); }
+    });
+    return dbp;
+  }
+  async function tx(mode, fn) {
+    const db = await open();
+    if (!db) return fn(null);
+    return new Promise(function (resolve, reject) {
+      const t = db.transaction('queue', mode);
+      const store = t.objectStore('queue');
+      const req = fn(store);
+      t.oncomplete = function () { resolve(req && req.result); };
+      t.onerror = function () { reject(t.error); };
+    });
+  }
+  return {
+    put(item) { return tx('readwrite', function (s) { if (!s) { mem.set(item.id, item); return null; } return s.put(item); }); },
+    del(id) { return tx('readwrite', function (s) { if (!s) { mem.delete(id); return null; } return s.delete(id); }); },
+    async all() {
+      const r = await tx('readonly', function (s) { return s ? s.getAll() : null; });
+      return r || Array.from(mem.values());
+    },
+  };
+})();
+
+// ------------------------------------------------------------------ state
+const state = {
+  apiUrl: LS.get('apiUrl', DEFAULT_API_URL),
+  token: LS.get('token', ''),
+  boot: null,
+  setup: LS.get('setup', null),
+  stream: null,
+  rec: null,
+  pumping: false,
+  recent: LS.get('recent', []),
+};
+
+const $ = function (id) { return document.getElementById(id); };
+const video = $('video');
+const cv = $('cv');
+const ctx = cv.getContext('2d');
+
+// ------------------------------------------------------------------ utils
+function show(id, on) { $(id).classList.toggle('hidden', !on); }
+function view(name) {
+  ['vLogin', 'vSetup', 'vStation'].forEach(function (v) { show(v, v === name); });
+  show('hdr', name !== 'vLogin');
+}
+let toastTimer = null;
+function toast(msg, ms) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { t.classList.add('hidden'); }, ms || 3500);
+}
+function uid() { return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
+// QR ใบขาย Ecount "E040206/20261031/6" เก็บเป็น "EC-20261031-6" (ต้องตรงกับ normCode_ ใน Code.gs)
+function normCode(v) {
+  const s = String(v || '').replace(/\s+/g, '').toUpperCase();
+  const m = s.match(/^E040206\/(\d{8})\/(\d+)$/);
+  return m ? 'EC-' + m[1] + '-' + m[2] : s;
+}
+function mmss(ms) { const s = Math.floor(ms / 1000); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function nameOf(list, id) { const x = (list || []).find(function (i) { return i.id === id; }); return x ? x.name : ''; }
+
+async function api(action, params) {
+  if (!state.apiUrl) throw new Error('ยังไม่ได้ตั้ง URL ของ Apps Script');
+  const body = Object.assign({ action: action, token: state.token }, params || {});
+  const res = await fetch(state.apiUrl, { method: 'POST', body: JSON.stringify(body) });
+  if (!res.ok) throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ (' + res.status + ')');
+  const j = await res.json();
+  if (!j.ok) {
+    const e = new Error(j.error);
+    e.code = j.code;
+    if (j.code === 'AUTH') { state.token = ''; LS.del('token'); setTimeout(gotoLogin, 0); }
+    throw e;
+  }
+  return j.data;
+}
+
+function blobToB64(blob) {
+  return new Promise(function (resolve, reject) {
+    const r = new FileReader();
+    r.onload = function () { resolve(String(r.result).split(',')[1] || ''); };
+    r.onerror = function () { reject(r.error); };
+    r.readAsDataURL(blob);
+  });
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); ta.remove();
+  }
+  toast('คัดลอกลิงก์แล้ว');
+}
+
+// ------------------------------------------------------------------ login
+function gotoLogin() {
+  stopCamera();
+  view('vLogin');
+  show('apiBox', !state.apiUrl);
+  $('inApi').value = state.apiUrl;
+  $('inEmail').value = LS.get('lastEmail', '');
+  show('otpBox', false);
+  $('loginErr').textContent = '';
+}
+
+$('btnOtp').onclick = async function () {
+  $('loginErr').textContent = '';
+  const url = $('inApi').value.trim();
+  if (url) { state.apiUrl = url; LS.set('apiUrl', url); }
+  const email = $('inEmail').value.trim().toLowerCase();
+  if (!email) { $('loginErr').textContent = 'กรุณาใส่อีเมล'; return; }
+  this.disabled = true;
+  try {
+    await api('requestOtp', { email: email });
+    LS.set('lastEmail', email);
+    show('otpBox', true);
+    $('inOtp').focus();
+    toast('ส่งรหัสไปที่ ' + email + ' แล้ว');
+  } catch (e) { $('loginErr').textContent = e.message; }
+  this.disabled = false;
+};
+
+$('btnVerify').onclick = async function () {
+  $('loginErr').textContent = '';
+  this.disabled = true;
+  try {
+    const r = await api('verifyOtp', { email: $('inEmail').value.trim().toLowerCase(), code: $('inOtp').value.trim() });
+    state.token = r.token;
+    LS.set('token', r.token);
+    await afterLogin();
+  } catch (e) { $('loginErr').textContent = e.message; }
+  this.disabled = false;
+};
+$('inOtp').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('btnVerify').click(); });
+
+$('btnLogout').onclick = async function () {
+  if (state.rec) { toast('กรุณาหยุดอัดก่อน'); return; }
+  try { await api('logout'); } catch (e) {}
+  state.token = ''; LS.del('token');
+  gotoLogin();
+};
+
+async function afterLogin() {
+  state.boot = await api('bootstrap');
+  $('hdrUser').textContent = state.boot.user.name + ' (' + state.boot.user.role + ')';
+  if (['Admin', 'Editor'].indexOf(state.boot.user.role) < 0) {
+    view('vLogin');
+    $('loginErr').textContent = 'สิทธิ์ ' + state.boot.user.role + ' ใช้สถานีแพคไม่ได้';
+    return;
+  }
+  const s = state.setup;
+  const valid = s && state.boot.branches.some(function (b) { return b.id === s.branchId && b.companyId === s.companyId; });
+  if (valid) await enterStation(); else await gotoSetup();
+  pumpQueue();
+}
+
+// ------------------------------------------------------------------ setup
+async function gotoSetup() {
+  if (state.rec) { toast('กรุณาหยุดอัดก่อน'); return; }
+  view('vSetup');
+  $('setupErr').textContent = '';
+  const b = state.boot, s = state.setup || {};
+  $('selCompany').innerHTML = b.companies.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>'; }).join('');
+  if (s.companyId) $('selCompany').value = s.companyId;
+  fillBranches();
+  if (s.branchId) $('selBranch').value = s.branchId;
+  fillStations();
+  if (s.stationId) $('selStation').value = s.stationId;
+  $('selRes').value = String(s.resolution || 720);
+  try {
+    const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    tmp.getTracks().forEach(function (t) { t.stop(); });
+    const cams = (await navigator.mediaDevices.enumerateDevices()).filter(function (d) { return d.kind === 'videoinput'; });
+    $('selCam').innerHTML = cams.map(function (c, i) { return '<option value="' + esc(c.deviceId) + '">' + esc(c.label || ('กล้อง ' + (i + 1))) + '</option>'; }).join('');
+    if (s.cameraId && cams.some(function (c) { return c.deviceId === s.cameraId; })) $('selCam').value = s.cameraId;
+  } catch (e) {
+    $('setupErr').textContent = 'เปิดกล้องไม่ได้: ' + e.message;
+  }
+}
+function fillBranches() {
+  const cid = $('selCompany').value;
+  $('selBranch').innerHTML = state.boot.branches.filter(function (x) { return x.companyId === cid; })
+    .map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name) + '</option>'; }).join('');
+  fillStations();
+}
+function fillStations() {
+  const bid = $('selBranch').value;
+  const st = state.boot.stations.filter(function (x) { return x.branchId === bid; });
+  $('selStation').innerHTML = '<option value="">(ไม่ระบุ)</option>' +
+    st.map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name) + '</option>'; }).join('');
+}
+$('selCompany').onchange = fillBranches;
+$('selBranch').onchange = fillStations;
+$('selStation').onchange = function () {
+  const st = state.boot.stations.find(function (x) { return x.id === $('selStation').value; });
+  if (st && st.resolution) $('selRes').value = st.resolution;
+};
+$('btnSetup').onclick = gotoSetup;
+
+$('btnStart').onclick = async function () {
+  if (!$('selBranch').value) { $('setupErr').textContent = 'กรุณาเลือกสาขา'; return; }
+  state.setup = {
+    companyId: $('selCompany').value,
+    branchId: $('selBranch').value,
+    stationId: $('selStation').value,
+    resolution: Number($('selRes').value),
+    cameraId: $('selCam').value,
+  };
+  LS.set('setup', state.setup);
+  await enterStation();
+};
+
+// ------------------------------------------------------------------ camera
+async function startCamera() {
+  stopCamera();
+  const s = state.setup;
+  const wh = SIZE[s.resolution] || SIZE[720];
+  state.stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: {
+      deviceId: s.cameraId ? { exact: s.cameraId } : undefined,
+      width: { ideal: wh[0] }, height: { ideal: wh[1] }, frameRate: { ideal: FPS },
+    },
+  });
+  video.srcObject = state.stream;
+  await video.play();
+  cv.width = video.videoWidth || wh[0];
+  cv.height = video.videoHeight || wh[1];
+}
+function stopCamera() {
+  if (state.stream) state.stream.getTracks().forEach(function (t) { t.stop(); });
+  state.stream = null;
+}
+
+async function enterStation() {
+  view('vStation');
+  const b = state.boot, s = state.setup;
+  $('hdrCtx').textContent = [nameOf(b.companies, s.companyId), nameOf(b.branches, s.branchId), nameOf(b.stations, s.stationId), s.resolution + 'p'].filter(Boolean).join(' · ');
+  renderRecent();
+  try {
+    await startCamera();
+  } catch (e) {
+    toast('เปิดกล้องไม่ได้: ' + e.message, 8000);
+  }
+  focusScan();
+}
+
+// วาดภาพจากกล้องลง canvas พร้อมข้อความ (เลข track เวลา ผู้แพค) แล้วอัดจาก canvas
+function draw() {
+  const rec = state.rec;
+  if (rec && video.readyState >= 2) {
+    const W = cv.width, H = cv.height;
+    ctx.drawImage(video, 0, 0, W, H);
+    const fs = Math.round(H / 24);
+    const lines = [
+      rec.code + (rec.platformId ? '  [' + nameOf(state.boot.platforms, rec.platformId) + ']' : '') +
+        (rec.carrierId ? ' ' + nameOf(state.boot.carriers, rec.carrierId) : ''),
+      new Date().toLocaleString('th-TH', { hour12: false }),
+      state.boot.user.name + (state.setup.stationId ? ' · ' + nameOf(state.boot.stations, state.setup.stationId) : ''),
+    ];
+    ctx.font = 'bold ' + fs + 'px Arial, sans-serif';
+    const w = Math.max.apply(null, lines.map(function (l) { return ctx.measureText(l).width; })) + fs;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, w, fs * 1.35 * lines.length + fs * 0.5);
+    ctx.fillStyle = '#fff';
+    lines.forEach(function (l, i) { ctx.fillText(l, fs * 0.5, fs * 1.2 + i * fs * 1.35); });
+    $('recBadge').textContent = 'REC ' + mmss(Date.now() - rec.start.getTime());
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+function pickMime() {
+  const c = ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm'];
+  return c.find(function (m) { return window.MediaRecorder && MediaRecorder.isTypeSupported(m); }) || '';
+}
+
+// ------------------------------------------------------------------ recording
+function startRecording(code) {
+  const mime = pickMime();
+  const mr = new MediaRecorder(cv.captureStream(FPS), { mimeType: mime, videoBitsPerSecond: BITRATE[state.setup.resolution] || BITRATE[720] });
+  const rec = {
+    clientId: uid(), code: code, start: new Date(), chunks: [], mr: mr, mime: mime,
+    platformId: null, suggestedId: null, parentTracking: '', existing: null, cancelled: false,
+  };
+  mr.ondataavailable = function (e) { if (e.data && e.data.size) rec.chunks.push(e.data); };
+  mr.start(1000);
+  rec.timer = setTimeout(function () { if (state.rec === rec) stopRecording('timeout').then(function () { toast('ตัดการอัดอัตโนมัติ (เกิน 10 นาที)', 6000); }); }, MAX_MS);
+  state.rec = rec;
+  $('recCode').textContent = code;
+  show('recBadge', true); show('recCode', true);
+  $('btnStop').disabled = false; $('btnCancel').disabled = false;
+  return rec;
+}
+
+function stopRecording(reason) {
+  return new Promise(function (resolve) {
+    const rec = state.rec;
+    if (!rec) return resolve();
+    finalizePlatform(rec);
+    state.rec = null;
+    clearTimeout(rec.timer);
+    show('recBadge', false); show('recCode', false); show('platBox', false); show('invalidBox', false); show('repeatBox', false);
+    $('btnStop').disabled = true; $('btnCancel').disabled = true;
+    rec.mr.onstop = async function () {
+      rec.end = new Date();
+      if (!rec.cancelled) {
+        try { await enqueue(rec, reason); } catch (e) { toast('บันทึกวิดีโอลงคิวไม่สำเร็จ: ' + e.message, 8000); }
+      }
+      resolve();
+    };
+    rec.mr.stop();
+    focusScan();
+  });
+}
+
+$('btnStop').onclick = function () { stopRecording('button'); };
+$('btnCancel').onclick = function () {
+  if (!state.rec || !confirm('ยกเลิกและทิ้งวิดีโอนี้?')) return;
+  state.rec.cancelled = true;
+  stopRecording('cancel');
+  toast('ยกเลิกการอัดแล้ว');
+};
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && state.rec) stopRecording('button'); });
+
+// ------------------------------------------------------------------ scan
+function focusScan() { setTimeout(function () { if (document.activeElement !== $('inParent')) $('scan').focus(); }, 0); }
+$('scan').addEventListener('blur', function () {
+  setTimeout(function () {
+    const a = document.activeElement;
+    if (!$('vStation').classList.contains('hidden') && (!a || ['INPUT', 'SELECT', 'TEXTAREA'].indexOf(a.tagName) < 0)) $('scan').focus();
+  }, 150);
+});
+$('scan').addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const v = this.value;
+  this.value = '';
+  handleScan(v);
+});
+
+function matchRule(code) {
+  const rules = state.boot.rules || [];
+  for (let i = 0; i < rules.length; i++) {
+    try { if (new RegExp(rules[i].pattern).test(code)) return rules[i]; } catch (e) {}
+  }
+  return null;
+}
+
+async function handleScan(raw) {
+  const code = normCode(raw);
+  if (!code) { if (!$('platBox').classList.contains('hidden')) confirmPlatform(); return; }
+  if (STOP_CODES.indexOf(code) >= 0) { await stopRecording('button'); return; }
+  if (state.rec && state.rec.code === code) { toast('กำลังอัดเลขนี้อยู่แล้ว'); return; }
+  if (!state.stream) { toast('กล้องยังไม่พร้อม ตรวจสอบการเชื่อมต่อกล้อง', 6000); return; }
+  if (state.rec) await stopRecording('next_scan');
+
+  const rec = startRecording(code);
+  const rule = matchRule(code);
+  if (rule) {
+    openPlatform(rec, rule.suggestPlatformId, rule.carrierId);
+  } else {
+    show('invalidBox', true);
+  }
+
+  try {
+    const chk = await api('checkTracking', { code: code });
+    if (state.rec !== rec) return;
+    // packCount 0 = เคยมีแต่คลิปถูกลบหมด ให้ถือเป็นเลขใหม่: คงหน้าต่างที่เปิดตามกฎบาร์โค้ดไว้
+    // (ไม่เปลี่ยนค่าที่เลือกอยู่ เพราะค่าเดิมอาจเป็นค่าที่ผิดจนต้องลบคลิป)
+    if (chk.existing && chk.existing.packCount === 0) {
+      if (!rule) {
+        show('invalidBox', false);
+        openPlatform(rec, chk.existing.platformId, chk.existing.carrierId);
+      }
+    } else if (chk.existing) {
+      rec.existing = chk.existing;
+      rec.platformId = chk.existing.platformId;
+      show('platBox', false); show('invalidBox', false);
+      const s = state.setup, x = chk.existing;
+      let msg = '<b>เลขนี้เคยแพคแล้ว ' + x.packCount + ' ครั้ง</b> (สถานะล่าสุด: ' + esc(x.statusName) + ')<br>ระบบจะเก็บวิดีโอเพิ่ม และเก็บของเดิมไว้';
+      if (x.companyId !== s.companyId || x.branchId !== s.branchId) {
+        msg += '<br><b>⚠ เลขนี้บันทึกไว้ที่บริษัท/สาขาอื่น</b> (' + esc(nameOf(state.boot.companies, x.companyId) || x.companyId) + ' · ' + esc(nameOf(state.boot.branches, x.branchId) || x.branchId) + ')';
+      }
+      $('repeatBox').innerHTML = msg;
+      show('repeatBox', true);
+    }
+  } catch (e) {
+    if (e.code !== 'AUTH') toast('ตรวจสอบเลขซ้ำไม่ได้: ' + e.message, 6000);
+  }
+}
+
+$('btnKeep').onclick = function () {
+  show('invalidBox', false);
+  if (state.rec) openPlatform(state.rec, 'OTHER', '');
+};
+$('btnDiscard').onclick = function () {
+  if (!state.rec) return;
+  state.rec.cancelled = true;
+  stopRecording('cancel');
+  toast('ยกเลิกการอัดแล้ว');
+};
+
+// ------------------------------------------------------------------ platform popup
+let platSel = null;
+let carSel = null;
+// เปิดหน้าต่างให้ยืนยันแพลตฟอร์มและการจัดส่ง โดยเลือกค่าที่ระบบแนะนำไว้ก่อน
+function openPlatform(rec, suggestedId, suggestedCarrierId) {
+  rec.suggestedId = suggestedId || 'OTHER';
+  rec.suggestedCarrierId = suggestedCarrierId || '';
+  platSel = rec.suggestedId;
+  carSel = rec.suggestedCarrierId;
+  $('inParent').value = '';
+  renderPlats();
+  show('platBox', true);
+}
+function choiceButtons(list, sel) {
+  return list.map(function (p) {
+    return '<button tabindex="-1" data-id="' + esc(p.id) + '" class="' + (p.id === sel ? 'sel' : '') + '">' + esc(p.name) + '</button>';
+  }).join('');
+}
+function renderPlats() {
+  $('plats').innerHTML = choiceButtons(state.boot.platforms, platSel);
+  $('cars').innerHTML = choiceButtons(state.boot.carriers || [], carSel);
+}
+['plats', 'cars'].forEach(function (id) {
+  $(id).addEventListener('mousedown', function (e) { e.preventDefault(); });
+  $(id).addEventListener('click', function (e) {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (id === 'plats') platSel = b.getAttribute('data-id');
+    else carSel = b.getAttribute('data-id');
+    renderPlats();
+  });
+});
+function confirmPlatform() {
+  const rec = state.rec;
+  if (!rec) return;
+  rec.platformId = platSel || rec.suggestedId || 'OTHER';
+  rec.carrierId = carSel || rec.suggestedCarrierId || '';
+  rec.parentTracking = normCode($('inParent').value);
+  show('platBox', false);
+  focusScan();
+}
+function finalizePlatform(rec) {
+  if (rec.existing) return;
+  if (!$('platBox').classList.contains('hidden')) confirmPlatform();
+  if (!rec.platformId) rec.platformId = rec.suggestedId || 'OTHER';
+  if (!rec.carrierId) rec.carrierId = rec.suggestedCarrierId || '';
+}
+$('btnPlatOk').onclick = confirmPlatform;
+$('inParent').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); confirmPlatform(); } });
+
+// ------------------------------------------------------------------ upload queue
+async function enqueue(rec, reason) {
+  const blob = new Blob(rec.chunks, { type: 'video/webm' });
+  if (!blob.size) throw new Error('ไม่มีข้อมูลวิดีโอ');
+  const s = state.setup;
+  const meta = {
+    clientId: rec.clientId, code: rec.code, platformId: rec.platformId, carrierId: rec.carrierId || '', parentTracking: rec.parentTracking,
+    companyId: s.companyId, branchId: s.branchId, stationId: s.stationId, resolution: s.resolution,
+    startTime: rec.start.toISOString(), endTime: rec.end.toISOString(),
+    durationSec: Math.round((rec.end - rec.start) / 1000), stopReason: reason,
+    mimeType: 'video/webm', size: blob.size,
+  };
+  await Q.put({ id: rec.clientId, blob: blob, meta: meta, tries: 0 });
+  setRecent(meta.clientId, { code: meta.code, at: meta.startTime, sec: meta.durationSec, status: 'wait', label: 'รออัปโหลด' });
+  pumpQueue();
+}
+
+async function uploadItem(item) {
+  const blob = item.blob;
+  const b = await api('beginPack', { meta: item.meta });
+  if (b.done) return b;
+  let offset = b.offset || 0;
+  while (offset < blob.size) {
+    const end = Math.min(offset + CHUNK, blob.size);
+    const data = await blobToB64(blob.slice(offset, end));
+    const r = await api('uploadChunk', { sessionId: b.sessionId, offset: offset, total: blob.size, data: data });
+    if (r.done) return Object.assign({ isRepeat: b.isRepeat }, r);
+    offset = r.next;
+    setRecent(item.id, { status: 'up', label: 'อัปโหลด ' + Math.round(offset / blob.size * 100) + '%' });
+  }
+  throw new Error('อัปโหลดไม่ครบ');
+}
+
+async function pumpQueue() {
+  if (state.pumping || !state.token) { state.pumpAgain = true; return; }
+  state.pumping = true;
+  state.pumpAgain = false;
+  let failed = false;
+  try {
+    let items = await Q.all();
+    items.sort(function (a, b) { return a.meta.startTime < b.meta.startTime ? -1 : 1; });
+    updateQueueInfo(items.length);
+    for (const item of items) {
+      setRecent(item.id, { code: item.meta.code, at: item.meta.startTime, sec: item.meta.durationSec, status: 'up', label: 'กำลังอัปโหลด' });
+      try {
+        const r = await uploadItem(item);
+        await Q.del(item.id);
+        setRecent(item.id, { status: 'done', label: 'เสร็จ', publicUrl: r.publicUrl, sessionId: r.sessionId, endAt: item.meta.endTime, by: state.boot.user.email });
+        if (r.warning) toast(r.warning, 8000);
+      } catch (e) {
+        item.tries = (item.tries || 0) + 1;
+        await Q.put(item);
+        setRecent(item.id, { status: 'err', label: 'ล้มเหลว จะลองใหม่ (' + e.message + ')' });
+        failed = true;
+        if (e.code !== 'AUTH') setTimeout(pumpQueue, 30000);
+        break;
+      }
+      updateQueueInfo((await Q.all()).length);
+    }
+  } finally {
+    state.pumping = false;
+  }
+  // มีวิดีโอใหม่เข้าคิวระหว่างที่กำลังอัปโหลดอยู่
+  if (!failed && state.pumpAgain) pumpQueue();
+}
+
+function updateQueueInfo(n) {
+  $('queueInfo').textContent = n ? '· รออัปโหลด ' + n + ' ไฟล์' : '';
+  $('hdrQueue').textContent = n ? 'คิวอัปโหลด ' + n : '';
+}
+
+// ------------------------------------------------------------------ recent list
+function setRecent(id, patch) {
+  let r = state.recent.find(function (x) { return x.id === id; });
+  if (!r) { r = { id: id }; state.recent.unshift(r); }
+  Object.assign(r, patch);
+  state.recent = state.recent.slice(0, 30);
+  LS.set('recent', state.recent);
+  renderRecent();
+}
+function renderRecent() {
+  $('recent').innerHTML = state.recent.map(function (r) {
+    const t = r.at ? new Date(r.at).toLocaleTimeString('th-TH', { hour12: false }) : '';
+    return '<div class="item"><div class="t"><b>' + esc(r.code) + '</b><div class="muted">' + esc(t) + (r.sec != null ? ' · ' + mmss(r.sec * 1000) : '') + '</div></div>' +
+      '<span class="pill ' + esc(r.status) + '" title="' + esc(r.label) + '">' + esc(String(r.label || '').slice(0, 24)) + '</span>' +
+      (r.publicUrl ? '<button tabindex="-1" data-url="' + esc(r.publicUrl) + '">คัดลอกลิงก์</button>' : '') +
+      (canDelete(r) ? '<button tabindex="-1" class="del" data-del="' + esc(r.id) + '">ลบ</button>' : '') + '</div>';
+  }).join('') || '<div class="muted">ยังไม่มีรายการ</div>';
+}
+
+// พนักงานลบคลิปของตัวเองได้ภายใน selfDeleteMinutes (เซิร์ฟเวอร์ตรวจซ้ำอีกชั้น), Admin ลบได้ตลอด
+function canDelete(r) {
+  if (r.status !== 'done' || !r.sessionId || !state.boot) return false;
+  const u = state.boot.user;
+  if (u.role === 'Admin') return true;
+  const limit = (state.boot.selfDeleteMinutes || 30) * 60000;
+  return r.by === u.email && Date.now() - new Date(r.endAt).getTime() < limit;
+}
+// ซ่อนปุ่มลบเมื่อหมดเวลา
+setInterval(function () { if (!$('vStation').classList.contains('hidden')) renderRecent(); }, 60000);
+
+async function deleteRecent(id) {
+  const r = state.recent.find(function (x) { return x.id === id; });
+  if (!r || !confirm('ลบวิดีโอ ' + r.code + ' ?\nไฟล์จะถูกลบออกจาก Drive และลูกค้าจะดูวิดีโอนี้ไม่ได้')) return;
+  try {
+    await api('deleteVideo', { sessionId: r.sessionId });
+    setRecent(id, { status: 'del', label: 'ลบแล้ว' });
+    toast('ลบวิดีโอแล้ว');
+  } catch (e) {
+    toast('ลบไม่สำเร็จ: ' + e.message, 6000);
+  }
+}
+$('recent').addEventListener('mousedown', function (e) { if (e.target.closest('button')) e.preventDefault(); });
+$('recent').addEventListener('click', function (e) {
+  const b = e.target.closest('button[data-url]');
+  if (b) copyText(b.getAttribute('data-url'));
+  const d = e.target.closest('button[data-del]');
+  if (d) deleteRecent(d.getAttribute('data-del')).then(focusScan);
+});
+
+window.addEventListener('beforeunload', function (e) {
+  if (state.rec || state.pumping) { e.preventDefault(); e.returnValue = ''; }
+});
+window.addEventListener('online', function () { pumpQueue(); });
+
+// ------------------------------------------------------------------ start
+(async function init() {
+  if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
+    document.body.innerHTML = '<div class="center card">เบราว์เซอร์นี้อัดวิดีโอไม่ได้ กรุณาใช้ Google Chrome</div>';
+    return;
+  }
+  if (!state.token) return gotoLogin();
+  try { await afterLogin(); }
+  catch (e) { if (e.code !== 'AUTH') { gotoLogin(); $('loginErr').textContent = e.message; } }
+})();
+</script>
+</body>
+</html>
