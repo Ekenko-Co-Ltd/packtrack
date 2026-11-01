@@ -301,7 +301,7 @@ $('btnOtp').onclick = async function () {
     LS.set('lastEmail', email);
     show('otpBox', true);
     $('inOtp').focus();
-    toast('ส่งรหัสไปที่ ' + email + ' แล้ว');
+    toast('ถ้าอีเมลนี้มีสิทธิ์ใช้งาน จะได้รับรหัสภายใน 1 นาที (ตรวจโฟลเดอร์ Spam ด้วย)', 8000);
   } catch (e) { $('loginErr').textContent = e.message; }
   this.disabled = false;
 };
@@ -775,3 +775,4 @@ window.addEventListener('online', function () { pumpQueue(); });
 </script>
 </body>
 </html>
+
