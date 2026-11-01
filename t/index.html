@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>สถานะพัสดุ</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --text:#1d2433; --muted:#6b7280; --line:#e5e7eb; --accent:#1f3864; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 "Sarabun","Noto Sans Thai",Arial,sans-serif; }
+  .wrap { max-width:760px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:4px 0 12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:14px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .badge { display:inline-block; color:#fff; border-radius:999px; padding:2px 12px; font-size:14px; font-weight:600; }
+  .track { font-size:22px; font-weight:700; letter-spacing:.5px; word-break:break-all; }
+  .grid { display:grid; grid-template-columns:140px 1fr; gap:4px 12px; margin-top:10px; }
+  .grid div:nth-child(odd) { color:var(--muted); }
+  h2 { font-size:16px; margin:18px 0 8px; color:var(--accent); }
+  .video { position:relative; width:100%; padding-top:56.25%; background:#000; border-radius:8px; overflow:hidden; margin-bottom:6px; }
+  .video iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
+  .timeline { list-style:none; margin:0; padding:0; }
+  .timeline li { border-left:3px solid var(--accent); padding:2px 0 10px 12px; }
+  .photos { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
+  .photos a { display:block; border-radius:8px; overflow:hidden; border:1px solid var(--line); background:#fafafa; text-decoration:none; color:inherit; }
+  .photos img { width:100%; height:130px; object-fit:cover; display:block; }
+  .photos span { display:block; padding:4px 6px; font-size:12px; color:var(--muted); }
+  .attempt-title { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+  .empty { text-align:center; padding:48px 16px; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+// หน้าสถานะพัสดุบน GitHub Pages: ดึงข้อมูลจาก Apps Script (action publicData) ด้วย ?t=token ในลิงก์
+const API_URL = 'https://script.google.com/a/macros/ekenko.co.th/s/AKfycbw-ZkJTo5LYeyNmwSFk-OHe7g8twc4J6_6QUxscY_eS2wsnVo_gN-hxUYstDcSri-V8Ww/exec';
+let DATA = null;
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function row(label, value) {
+  return value === '' || value == null ? '' : '<div>' + esc(label) + '</div><div>' + esc(value) + '</div>';
+}
+function secs(n) {
+  n = Number(n) || 0;
+  return Math.floor(n / 60) + ' นาที ' + (n % 60) + ' วินาที';
+}
+
+function renderAttempt(a, many) {
+  let h = '<div class="card">';
+  h += '<div class="attempt-title"><div>' + (many ? '<div class="muted">ครั้งที่ ' + a.attempt + '</div>' : '') +
+       '<div class="track">' + esc(a.tracking) + '</div></div>' +
+       '<span class="badge" style="background:' + esc(a.statusColor) + '">' + esc(a.status) + '</span></div>';
+  h += '<div class="grid">' +
+       row('ขนส่ง', a.carrier) + row('แพลตฟอร์ม', a.platform) + row('เลขออเดอร์', a.orderNo) +
+       row('ผู้ส่ง', [a.company, a.branch].filter(Boolean).join(' · ')) +
+       row('แพคเมื่อ', a.firstPackedAt) + row('ส่งออกเมื่อ', a.shippedAt) + row('สาเหตุตีคืน', a.returnReason) +
+       '</div>';
+
+  if (a.videos.length) {
+    h += '<h2>วิดีโอการแพค</h2>';
+    a.videos.forEach(function (v) {
+      h += '<div class="video"><iframe src="https://drive.google.com/file/d/' + encodeURIComponent(v.fileId) +
+           '/preview" allow="autoplay" allowfullscreen loading="lazy"></iframe></div>' +
+           '<div class="muted" style="margin-bottom:12px">' + esc(v.at) + ' · ' + secs(v.sec) + (v.packer ? ' · ผู้แพค ' + esc(v.packer) : '') + '</div>';
+    });
+  }
+
+  if (a.deletedVideos && !a.videos.length) {
+    h += '<h2>วิดีโอการแพค</h2><p class="muted">วิดีโอหมดอายุการเก็บหรือถูกลบแล้ว</p>';
+  }
+
+  a.dispatches.forEach(function (d) {
+    h += '<h2>ข้อมูลการจัดส่ง</h2><div class="grid">' +
+         row('วันที่ส่ง', d.date) + row('ขนส่ง', d.carrier) + row('บริษัทขนส่ง', d.courierName) +
+         row('เบอร์ขนส่ง', d.courierPhone) + row('เลข track ขนส่ง', d.courierTrackingNo) + row('เลขบิล', d.billNo) + row('จำนวนลัง', d.boxCount) +
+         row('ทะเบียนรถ', d.vehiclePlate) + row('คนขับ', d.driverName) + row('เบอร์คนขับ', d.driverPhone) +
+         row('ค่าส่ง', d.shippingCost) + row('รายละเอียด', d.details) + '</div>';
+  });
+
+  if (a.attachments.length) {
+    h += '<h2>รูปภาพแนบ</h2><div class="photos">';
+    a.attachments.forEach(function (p) {
+      const id = encodeURIComponent(p.fileId);
+      h += '<a href="https://drive.google.com/file/d/' + id + '/view" target="_blank" rel="noopener">' +
+           '<img src="https://drive.google.com/thumbnail?id=' + id + '&sz=w600" alt="" loading="lazy">' +
+           '<span>' + esc([p.type, p.caption].filter(Boolean).join(' · ')) + '</span></a>';
+    });
+    h += '</div>';
+  }
+
+  if (a.history.length) {
+    h += '<h2>ประวัติสถานะ</h2><ul class="timeline">';
+    a.history.slice().reverse().forEach(function (x) {
+      h += '<li><b>' + esc(x.to) + '</b><div class="muted">' + esc(x.at) + (x.by ? ' · ' + esc(x.by) : '') +
+           (x.note ? ' · ' + esc(x.note) : '') + '</div></li>';
+    });
+    h += '</ul>';
+  }
+  return h + '</div>';
+}
+
+(async function () {
+  const app = document.getElementById('app');
+  const t = new URLSearchParams(location.search).get('t') || '';
+  if (t) {
+    app.innerHTML = '<div class="card empty">กำลังโหลด...</div>';
+    try {
+      const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'publicData', t: t }) });
+      const j = await res.json();
+      if (j.ok) DATA = j.data;
+    } catch (e) {
+      app.innerHTML = '<div class="card empty">โหลดข้อมูลไม่ได้ กรุณาตรวจอินเทอร์เน็ตแล้วลองใหม่</div>';
+      return;
+    }
+  }
+  if (!DATA) {
+    app.innerHTML = '<div class="card empty">ไม่พบข้อมูลพัสดุ กรุณาตรวจสอบลิงก์อีกครั้ง</div>';
+    return;
+  }
+  const many = DATA.attempts.length > 1;
+  let h = '<h1>สถานะพัสดุ</h1>';
+  if (many) h += '<p class="muted">พัสดุนี้มีการส่งทั้งหมด ' + DATA.attempts.length + ' ครั้ง (ล่าสุดอยู่บนสุด)</p>';
+  DATA.attempts.slice().reverse().forEach(function (a) { h += renderAttempt(a, many); });
+  app.innerHTML = h;
+})();
+</script>
+</body>
+</html>
