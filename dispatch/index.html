@@ -1,0 +1,958 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f3864">
+<title>PackTrack ส่งออก</title>
+<style>
+  :root { --bg:#f3f4f6; --card:#fff; --text:#111827; --muted:#6b7280; --line:#e5e7eb; --accent:#1f3864; --ok:#16a34a; --warn:#d97706; --bad:#dc2626; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.45 "Sarabun","Noto Sans Thai",Arial,sans-serif; padding-bottom:88px; }
+  header { position:sticky; top:0; z-index:5; background:var(--accent); color:#fff; padding:10px 16px; display:flex; gap:10px; align-items:center; }
+  header b { font-size:17px; }
+  header .sp { flex:1; }
+  header button { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.5); padding:6px 10px; }
+  main { max-width:640px; margin:0 auto; padding:12px 16px; }
+  button { font:inherit; border-radius:10px; border:1px solid var(--line); background:#fff; padding:10px 14px; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.danger { background:var(--bad); color:#fff; border-color:var(--bad); }
+  button.small { padding:6px 10px; font-size:14px; }
+  button:disabled { opacity:.5; }
+  input, select, textarea { font:inherit; padding:10px 12px; border:1px solid #cbd5e1; border-radius:10px; width:100%; background:#fff; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  .hidden { display:none !important; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .row { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .row > * { flex:1; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
+  .badge { display:inline-block; color:#fff; border-radius:999px; padding:2px 10px; font-size:13px; font-weight:600; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .chips button { padding:6px 12px; font-size:14px; flex:none; }
+  .chips button.sel { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .batch { display:flex; gap:10px; align-items:center; cursor:pointer; }
+  .batch .t { flex:1; min-width:0; }
+  #scan { font-size:20px; font-weight:700; text-transform:uppercase; }
+  .item { border-top:1px solid var(--line); padding:10px 0; }
+  .item:first-child { border-top:0; }
+  .item .top { display:flex; gap:8px; align-items:center; }
+  .item .top b { flex:1; word-break:break-all; }
+  .item .warn { color:var(--warn); font-size:13px; }
+  .item .edit { margin-top:8px; }
+  .thumbs { display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:8px; margin-top:8px; }
+  .thumb { position:relative; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:#f9fafb; font-size:12px; }
+  .thumb img { width:100%; height:80px; object-fit:cover; display:block; }
+  .thumb .ph { height:80px; display:flex; align-items:center; justify-content:center; color:var(--muted); }
+  .thumb .cap { padding:3px 6px; }
+  .thumb .acts { display:flex; border-top:1px solid var(--line); }
+  .thumb .acts button { flex:1; border:0; border-radius:0; padding:4px; font-size:12px; background:#fff; }
+  .thumb.private img { opacity:.6; }
+  .footer { position:fixed; left:0; right:0; bottom:0; background:#fff; border-top:1px solid var(--line); padding:10px 16px calc(10px + env(safe-area-inset-bottom)); display:flex; gap:8px; z-index:5; }
+  .footer > * { flex:1; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:20; display:flex; align-items:flex-end; justify-content:center; }
+  .modal .sheet { background:#fff; width:100%; max-width:640px; border-radius:16px 16px 0 0; padding:16px; max-height:90vh; overflow:auto; }
+  #cam { position:fixed; inset:0; background:#000; z-index:30; display:flex; flex-direction:column; }
+  #camBox { flex:1; }
+  #camBox video { object-fit:cover; }
+  #cam .bar { padding:12px 16px calc(12px + env(safe-area-inset-bottom)); display:flex; gap:8px; align-items:center; color:#fff; }
+  #cam .bar span { flex:1; font-size:14px; }
+  #toast { position:fixed; left:50%; bottom:96px; transform:translateX(-50%); background:#111827; color:#fff; padding:10px 18px; border-radius:10px; z-index:40; max-width:92vw; text-align:center; }
+  #toast.warn { background:#b45309; } #toast.bad { background:var(--bad); }
+  .err { color:var(--bad); font-size:14px; margin-top:8px; }
+</style>
+</head>
+<body>
+
+<header id="hdr" class="hidden">
+  <b>ส่งออก</b>
+  <span id="hdrCtx" class="muted" style="color:#dbeafe"></span>
+  <span class="sp"></span>
+  <button id="btnHome" class="hidden">รอบทั้งหมด</button>
+  <button id="btnLogout">ออก</button>
+</header>
+
+<main>
+  <!-- เข้าสู่ระบบ (ใช้ session ร่วมกับหน้าสถานีแพค) -->
+  <section id="vLogin" class="hidden">
+    <div class="card">
+      <h2 style="margin-top:0">เข้าสู่ระบบ</h2>
+      <label>อีเมล</label>
+      <input id="inEmail" type="email" autocomplete="email">
+      <div class="row"><button class="primary" id="btnOtp">ส่งรหัสทางอีเมล</button></div>
+      <div id="otpBox" class="hidden">
+        <label>รหัส 6 หลักจากอีเมล</label>
+        <input id="inOtp" inputmode="numeric" maxlength="6">
+        <div class="row"><button class="primary" id="btnVerify">เข้าสู่ระบบ</button></div>
+      </div>
+      <div id="loginErr" class="err"></div>
+    </div>
+  </section>
+
+  <!-- รายการรอบ -->
+  <section id="vHome" class="hidden">
+    <div class="card">
+      <div class="grid2">
+        <div><label style="margin-top:0">บริษัท</label><select id="selCompany"></select></div>
+        <div><label style="margin-top:0">สาขา</label><select id="selBranch"></select></div>
+      </div>
+      <div class="row"><button class="primary" id="btnNew">+ เปิดรอบใหม่</button></div>
+    </div>
+    <div class="card">
+      <b>รอบที่เปิดอยู่ และรอบ 3 วันล่าสุด</b>
+      <div id="batches"></div>
+    </div>
+  </section>
+
+  <!-- ฟอร์มรอบ -->
+  <section id="vForm" class="hidden">
+    <div class="card">
+      <h3 style="margin-top:0" id="formTitle">เปิดรอบใหม่</h3>
+      <label>สถานะที่จะตั้งให้ทุกออเดอร์ในรอบ</label>
+      <div id="fStatus" class="chips"></div>
+      <div class="grid2">
+        <div><label>วันที่</label><input id="fDate" type="date"></div>
+        <div><label>การจัดส่ง</label><select id="fCarrier"></select></div>
+      </div>
+      <div class="grid2">
+        <div><label>บริษัทขนส่ง</label><input id="fCourierName"></div>
+        <div><label>เบอร์ขนส่ง</label><input id="fCourierPhone" type="tel"></div>
+      </div>
+      <div class="grid2">
+        <div><label>ทะเบียนรถ</label><input id="fPlate"></div>
+        <div><label>เลขบิลค่าส่ง</label><input id="fBill"></div>
+      </div>
+      <div class="grid2">
+        <div><label>ชื่อคนขับ</label><input id="fDriver"></div>
+        <div><label>เบอร์คนขับ</label><input id="fDriverPhone" type="tel"></div>
+      </div>
+      <label>ค่าเหมารถทั้งรอบ (บาท, ถ้ามี)</label>
+      <input id="fTripCost" type="number" inputmode="decimal" min="0" step="0.01">
+      <label>รายละเอียดเพิ่มเติม / สาเหตุตีคืน</label>
+      <textarea id="fDetails" rows="2"></textarea>
+      <div class="muted" style="margin-top:8px">ไม่บังคับกรอก ยกเว้นสถานะ</div>
+      <div class="row"><button id="btnFormCancel">ยกเลิก</button><button class="primary" id="btnFormSave">บันทึก</button></div>
+      <div id="formErr" class="err"></div>
+    </div>
+  </section>
+
+  <!-- หน้ารอบ -->
+  <section id="vBatch" class="hidden">
+    <div class="card">
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="bStatus" class="badge"></span>
+        <b id="bTitle" style="flex:1"></b>
+        <button class="small" id="btnEdit">แก้ไข</button>
+      </div>
+      <div id="bInfo" class="muted" style="margin-top:6px"></div>
+    </div>
+
+    <div class="card" id="scanCard">
+      <label style="margin-top:0">สแกนเลข track (เครื่องสแกน หรือพิมพ์แล้วกด Enter)</label>
+      <input id="scan" autocomplete="off" spellcheck="false" inputmode="none" placeholder="แตะที่นี่ก่อนใช้เครื่องสแกน">
+      <div class="row">
+        <button class="primary" id="btnCam">📷 สแกนด้วยกล้อง</button>
+        <button id="btnKbd">⌨ พิมพ์เลข</button>
+      </div>
+      <div id="pending" class="muted"></div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:8px">
+        <b style="flex:1">รูปของทั้งรอบ</b>
+      </div>
+      <div class="muted">เช่น ทะเบียนรถ สินค้าบนรถ บิล</div>
+      <div id="photoTypes" class="chips"></div>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-size:15px">
+        <input type="checkbox" id="photoPublic" checked style="width:auto"> โชว์ให้ลูกค้าเห็น
+      </label>
+      <div class="row"><button id="btnBatchPhoto">📷 ถ่าย / เลือกรูป</button></div>
+      <div id="batchPhotos" class="thumbs"></div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:8px">
+        <b style="flex:1">ออเดอร์ในรอบ <span id="itemCount"></span></b>
+        <span class="muted" id="costSum"></span>
+      </div>
+      <div id="items"></div>
+    </div>
+  </section>
+</main>
+
+<div class="footer hidden" id="footer">
+  <button id="btnSplit">แบ่งค่าเหมารถ</button>
+  <button class="danger" id="btnClose">ปิดรอบ</button>
+</div>
+
+<!-- ยืนยันแพลตฟอร์ม/การจัดส่ง สำหรับเลขใหม่ -->
+<div class="modal hidden" id="platModal">
+  <div class="sheet">
+    <b id="platCode"></b>
+    <div class="muted">เลขใหม่ ยังไม่เคยแพค · ตรวจสอบแล้วกดยืนยัน</div>
+    <div id="platWarn" class="err"></div>
+    <label>แพลตฟอร์ม</label><div id="plats" class="chips"></div>
+    <label>การจัดส่ง</label><div id="cars" class="chips"></div>
+    <div class="row"><button id="btnPlatCancel">ไม่เพิ่มเลขนี้</button><button class="primary" id="btnPlatOk">ยืนยัน</button></div>
+  </div>
+</div>
+
+<!-- แบ่งค่าเหมารถ: เติมค่าเฉลี่ยให้ก่อน แล้วปรับแต่ละออเดอร์เอง -->
+<div class="modal hidden" id="costModal">
+  <div class="sheet">
+    <b>แบ่งค่าเหมารถ</b>
+    <div class="muted">ใส่จำนวนลัง แล้วกดเฉลี่ย ระบบเติมค่าให้ ปรับแต่ละออเดอร์ได้ก่อนบันทึก</div>
+    <div class="grid2 muted" style="grid-template-columns:1fr 70px 110px;margin-top:8px"><div>เลข track</div><div>ลัง</div><div>ค่าส่ง (บาท)</div></div>
+    <div id="costRows"></div>
+    <div class="row">
+      <button id="btnCostByBox">เฉลี่ยตามจำนวนลัง</button>
+      <button id="btnCostAvg">เฉลี่ยเท่ากัน</button>
+    </div>
+    <div id="costSumBox" class="card" style="margin:10px 0 0;padding:10px"></div>
+    <div class="row">
+      <button id="btnCostCancel">ยกเลิก</button>
+      <button class="primary" id="btnCostSave">บันทึก</button>
+    </div>
+  </div>
+</div>
+
+<!-- กล้องสแกน -->
+<div id="cam" class="hidden">
+  <div id="camBox"></div>
+  <div class="bar"><span id="camMsg">เล็งบาร์โค้ดหรือ QR ให้อยู่ในกรอบ</span><button id="btnCamClose">ปิดกล้อง</button></div>
+</div>
+
+<input type="file" id="filePick" accept="image/*" multiple class="hidden">
+<div id="toast" class="hidden"></div>
+
+<script>
+'use strict';
+
+// ------------------------------------------------------------------ config
+const DEFAULT_API_URL = 'https://script.google.com/a/macros/ekenko.co.th/s/AKfycbw-ZkJTo5LYeyNmwSFk-OHe7g8twc4J6_6QUxscY_eS2wsnVo_gN-hxUYstDcSri-V8Ww/exec';
+const QR_LIB = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+const PHOTO_MAX = 1600;
+const PHOTO_QUALITY = 0.8;
+const PHOTO_TYPES = ['ทะเบียนรถ', 'สินค้า', 'บิล', 'อื่น ๆ'];
+const SAME_CODE_MS = 3000; // กล้องอ่านเลขเดิมซ้ำภายในเวลานี้ให้ข้าม
+
+// ------------------------------------------------------------------ storage (token/apiUrl ใช้ร่วมกับหน้าสถานีแพค)
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('pt_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('pt_' + k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem('pt_' + k); } catch (e) {} },
+};
+
+const state = {
+  apiUrl: LS.get('apiUrl', DEFAULT_API_URL),
+  token: LS.get('token', ''),
+  boot: null,
+  ctx: LS.get('d_ctx', null),
+  batch: null,
+  items: [],
+  photos: [],
+  thumbs: {},          // attachId -> object URL ของรูปที่ถ่ายในเครื่องนี้
+  editingId: null,
+  chain: Promise.resolve(),
+  pendingCount: 0,
+  photoType: PHOTO_TYPES[0],
+  photoTarget: null,   // null = รูปของรอบ, หรือ shipmentId
+};
+
+const $ = function (id) { return document.getElementById(id); };
+
+// ------------------------------------------------------------------ utils
+function show(id, on) { $(id).classList.toggle('hidden', !on); }
+function view(name) {
+  ['vLogin', 'vHome', 'vForm', 'vBatch'].forEach(function (v) { show(v, v === name); });
+  show('hdr', name !== 'vLogin');
+  show('btnHome', name === 'vBatch' || name === 'vForm');
+  show('footer', name === 'vBatch' && state.batch && state.batch.open);
+  window.scrollTo(0, 0);
+}
+let toastTimer = null;
+function toast(msg, kind, ms) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = kind || '';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { t.className = 'hidden'; }, ms || 3500);
+}
+function buzz(pattern) { try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {} }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function nameOf(list, id) { const x = (list || []).find(function (i) { return i.id === id; }); return x ? x.name : ''; }
+function today() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function money(n) { return Number(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 }); }
+
+// QR ใบขาย Ecount "E040206/20261031/6" เก็บเป็น "EC-20261031-6" (ต้องตรงกับ normCode_ ใน Code.gs)
+function normCode(v) {
+  const s = String(v || '').replace(/\s+/g, '').toUpperCase();
+  const m = s.match(/^E040206\/(\d{8})\/(\d+)$/);
+  return m ? 'EC-' + m[1] + '-' + m[2] : s;
+}
+function matchRule(code) {
+  const rules = state.boot.rules || [];
+  for (let i = 0; i < rules.length; i++) {
+    try { if (new RegExp(rules[i].pattern).test(code)) return rules[i]; } catch (e) {}
+  }
+  return null;
+}
+
+async function api(action, params) {
+  const body = Object.assign({ action: action, token: state.token }, params || {});
+  let res;
+  try {
+    res = await fetch(state.apiUrl, { method: 'POST', body: JSON.stringify(body) });
+  } catch (e) {
+    const err = new Error('เชื่อมต่ออินเทอร์เน็ตไม่ได้');
+    err.code = 'NET';
+    throw err;
+  }
+  if (!res.ok) { const err = new Error('เซิร์ฟเวอร์ตอบผิดปกติ (' + res.status + ')'); err.code = 'NET'; throw err; }
+  const j = await res.json();
+  if (!j.ok) {
+    const e = new Error(j.error);
+    e.code = j.code;
+    if (j.code === 'AUTH') { state.token = ''; LS.del('token'); setTimeout(gotoLogin, 0); }
+    throw e;
+  }
+  return j.data;
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); ta.remove();
+  }
+  toast('คัดลอกลิงก์แล้ว');
+}
+
+// ------------------------------------------------------------------ login
+function gotoLogin() {
+  view('vLogin');
+  $('inEmail').value = LS.get('lastEmail', '');
+  show('otpBox', false);
+  $('loginErr').textContent = '';
+}
+$('btnOtp').onclick = async function () {
+  $('loginErr').textContent = '';
+  const email = $('inEmail').value.trim().toLowerCase();
+  if (!email) { $('loginErr').textContent = 'กรุณาใส่อีเมล'; return; }
+  this.disabled = true;
+  try {
+    await api('requestOtp', { email: email });
+    LS.set('lastEmail', email);
+    show('otpBox', true);
+    $('inOtp').focus();
+    toast('ถ้าอีเมลนี้มีสิทธิ์ใช้งาน จะได้รับรหัสภายใน 1 นาที (ตรวจโฟลเดอร์ Spam ด้วย)', '', 8000);
+  } catch (e) { $('loginErr').textContent = e.message; }
+  this.disabled = false;
+};
+$('btnVerify').onclick = async function () {
+  $('loginErr').textContent = '';
+  this.disabled = true;
+  try {
+    const r = await api('verifyOtp', { email: $('inEmail').value.trim().toLowerCase(), code: $('inOtp').value.trim() });
+    state.token = r.token;
+    LS.set('token', r.token);
+    await afterLogin();
+  } catch (e) { $('loginErr').textContent = e.message; }
+  this.disabled = false;
+};
+$('inOtp').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('btnVerify').click(); });
+$('btnLogout').onclick = async function () {
+  if (!confirm('ออกจากระบบ?')) return;
+  try { await api('logout'); } catch (e) {}
+  state.token = ''; LS.del('token');
+  gotoLogin();
+};
+
+async function afterLogin() {
+  state.boot = await api('bootstrap');
+  if (['Admin', 'Editor'].indexOf(state.boot.user.role) < 0) {
+    gotoLogin();
+    $('loginErr').textContent = 'สิทธิ์ ' + state.boot.user.role + ' ใช้หน้าส่งออกไม่ได้';
+    return;
+  }
+  fillCtx();
+  const last = LS.get('d_batch', '');
+  if (last) {
+    try { await openBatch(last); return; } catch (e) { LS.del('d_batch'); }
+  }
+  await gotoHome();
+}
+
+// ------------------------------------------------------------------ home
+function fillCtx() {
+  const b = state.boot;
+  const c = state.ctx || {};
+  $('selCompany').innerHTML = b.companies.map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name) + '</option>'; }).join('');
+  if (c.companyId && b.companies.some(function (x) { return x.id === c.companyId; })) $('selCompany').value = c.companyId;
+  fillBranches();
+  if (c.branchId && b.branches.some(function (x) { return x.id === c.branchId; })) $('selBranch').value = c.branchId;
+  saveCtx();
+}
+function fillBranches() {
+  const cid = $('selCompany').value;
+  $('selBranch').innerHTML = state.boot.branches.filter(function (x) { return x.companyId === cid; })
+    .map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name) + '</option>'; }).join('');
+}
+function saveCtx() {
+  state.ctx = { companyId: $('selCompany').value, branchId: $('selBranch').value };
+  LS.set('d_ctx', state.ctx);
+  $('hdrCtx').textContent = nameOf(state.boot.branches, state.ctx.branchId);
+}
+$('selCompany').onchange = function () { fillBranches(); saveCtx(); loadBatches(); };
+$('selBranch').onchange = function () { saveCtx(); loadBatches(); };
+$('btnHome').onclick = function () { gotoHome(); };
+
+async function gotoHome() {
+  state.batch = null;
+  LS.del('d_batch');
+  view('vHome');
+  await loadBatches();
+}
+async function loadBatches() {
+  $('batches').innerHTML = '<div class="muted">กำลังโหลด...</div>';
+  try {
+    const list = await api('listBatches', { companyId: state.ctx.companyId, branchId: state.ctx.branchId });
+    $('batches').innerHTML = list.map(function (b) {
+      const st = state.boot.statuses.find(function (s) { return s.id === b.statusId; }) || {};
+      return '<div class="item batch" data-id="' + esc(b.id) + '"><div class="t">' +
+        '<span class="badge" style="background:' + esc(st.color || '#555') + '">' + esc(st.name || b.statusId) + '</span> ' +
+        (b.open ? '' : '<span class="muted">(ปิดแล้ว)</span>') +
+        '<div><b>' + esc(batchTitle(b)) + '</b></div>' +
+        '<div class="muted">' + esc(b.createdAt) + ' · ' + b.itemCount + ' ออเดอร์</div></div><span>›</span></div>';
+    }).join('') || '<div class="muted" style="margin-top:8px">ยังไม่มีรอบ</div>';
+  } catch (e) {
+    $('batches').innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+  }
+}
+$('batches').addEventListener('click', function (e) {
+  const el = e.target.closest('[data-id]');
+  if (el) openBatch(el.getAttribute('data-id')).catch(function (err) { toast(err.message, 'bad'); });
+});
+function batchTitle(b) {
+  return [nameOf(state.boot.carriers, b.carrierId), b.courierName, b.vehiclePlate].filter(Boolean).join(' · ') || ('รอบ ' + b.date);
+}
+
+// ------------------------------------------------------------------ batch form
+let formStatus = null;
+$('btnNew').onclick = function () { openForm(null); };
+$('btnEdit').onclick = function () { openForm(state.batch); };
+$('btnFormCancel').onclick = function () { if (state.batch) view('vBatch'); else gotoHome(); };
+
+function openForm(b) {
+  $('formTitle').textContent = b ? 'แก้ไขรอบส่ง' : 'เปิดรอบใหม่';
+  $('formErr').textContent = '';
+  // สถานะ "แพคเสร็จ" มาจากสถานีแพคเท่านั้น
+  const sts = state.boot.statuses.filter(function (s) { return s.id !== 'ST-PACKED'; });
+  formStatus = b ? b.statusId : (sts.find(function (s) { return s.id === 'ST-SHIPPED'; }) || sts[0] || {}).id;
+  $('fStatus').innerHTML = sts.map(function (s) {
+    return '<button type="button" data-id="' + esc(s.id) + '" class="' + (s.id === formStatus ? 'sel' : '') + '">' + esc(s.name) + '</button>';
+  }).join('');
+  $('fCarrier').innerHTML = '<option value="">(ไม่ระบุ)</option>' + state.boot.carriers.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>'; }).join('');
+  $('fDate').value = b ? b.date : today();
+  $('fCarrier').value = b ? b.carrierId : '';
+  $('fCourierName').value = b ? b.courierName : '';
+  $('fCourierPhone').value = b ? b.courierPhone : '';
+  $('fPlate').value = b ? b.vehiclePlate : '';
+  $('fBill').value = b ? b.billNo : '';
+  $('fDriver').value = b ? b.driverName : '';
+  $('fDriverPhone').value = b ? b.driverPhone : '';
+  $('fTripCost').value = b && b.tripCost !== '' ? b.tripCost : '';
+  $('fDetails').value = b ? b.details : '';
+  view('vForm');
+}
+$('fStatus').addEventListener('click', function (e) {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  formStatus = btn.getAttribute('data-id');
+  Array.prototype.forEach.call($('fStatus').children, function (c) { c.classList.toggle('sel', c === btn); });
+});
+$('btnFormSave').onclick = async function () {
+  $('formErr').textContent = '';
+  const data = {
+    companyId: state.ctx.companyId, branchId: state.ctx.branchId,
+    statusId: formStatus, date: $('fDate').value, carrierId: $('fCarrier').value,
+    courierName: $('fCourierName').value, courierPhone: $('fCourierPhone').value,
+    vehiclePlate: $('fPlate').value.toUpperCase(), billNo: $('fBill').value,
+    driverName: $('fDriver').value, driverPhone: $('fDriverPhone').value,
+    tripCost: $('fTripCost').value, details: $('fDetails').value,
+  };
+  this.disabled = true;
+  try {
+    const editing = state.batch && $('formTitle').textContent === 'แก้ไขรอบส่ง';
+    const b = await api('saveBatch', { batchId: editing ? state.batch.id : '', batch: data });
+    await openBatch(b.id);
+    toast(editing ? 'บันทึกแล้ว' : 'เปิดรอบแล้ว เริ่มสแกนได้เลย');
+  } catch (e) { $('formErr').textContent = e.message; }
+  this.disabled = false;
+};
+
+// ------------------------------------------------------------------ batch screen
+async function openBatch(id) {
+  const r = await api('getBatch', { batchId: id });
+  state.batch = r.batch;
+  state.items = r.items;
+  state.photos = r.photos;
+  state.editingId = null;
+  LS.set('d_batch', id);
+  view('vBatch');
+  renderBatch();
+  focusScan();
+}
+
+function renderBatch() {
+  const b = state.batch;
+  const st = state.boot.statuses.find(function (s) { return s.id === b.statusId; }) || {};
+  $('bStatus').textContent = st.name || b.statusId;
+  $('bStatus').style.background = st.color || '#555';
+  $('bTitle').textContent = batchTitle(b) + (b.open ? '' : ' (ปิดแล้ว)');
+  $('bInfo').innerHTML = [
+    'วันที่ ' + esc(b.date),
+    b.courierPhone ? 'โทร ' + esc(b.courierPhone) : '',
+    b.driverName ? 'คนขับ ' + esc(b.driverName) + (b.driverPhone ? ' ' + esc(b.driverPhone) : '') : '',
+    b.billNo ? 'บิล ' + esc(b.billNo) : '',
+    b.tripCost !== '' ? 'ค่าเหมารถ ' + money(b.tripCost) + ' บาท' : '',
+    b.details ? esc(b.details) : '',
+  ].filter(Boolean).join(' · ');
+  show('scanCard', b.open);
+  show('btnEdit', b.open);
+  show('footer', b.open);
+  $('btnSplit').disabled = !(b.tripCost > 0) || !state.items.length;
+  renderPhotoTypes();
+  renderPhotos();
+  renderItems();
+}
+
+function renderItems() {
+  $('itemCount').textContent = '(' + state.items.length + ')';
+  const sum = state.items.reduce(function (a, i) { return a + (Number(i.shippingCost) || 0); }, 0);
+  $('costSum').textContent = sum ? 'ค่าส่งรวม ' + money(sum) + ' บาท' : '';
+  const open = state.batch.open;
+  $('items').innerHTML = state.items.map(function (i) {
+    const photos = state.photos.filter(function (p) { return p.shipmentId === i.shipmentId; });
+    const editing = state.editingId === i.id;
+    return '<div class="item" data-item="' + esc(i.id) + '">' +
+      '<div class="top"><b>' + esc(i.trackingNo) + '</b>' +
+      '<button class="small" data-act="edit">' + (editing ? 'ปิด' : 'รายละเอียด') + '</button></div>' +
+      '<div class="muted">' + esc([i.scannedAt, nameOf(state.boot.platforms, i.platformId), nameOf(state.boot.carriers, i.carrierId)].filter(Boolean).join(' · ')) +
+      ' · ' + (i.boxCount || 1) + ' ลัง' +
+      (i.shippingCost !== '' ? ' · ค่าส่ง ' + money(i.shippingCost) : '') +
+      (i.courierTrackingNo ? ' · track ขนส่ง ' + esc(i.courierTrackingNo) : '') +
+      (photos.length ? ' · รูป ' + photos.length : '') + '</div>' +
+      (i.packCount === 0 ? '<div class="warn">⚠ ยังไม่มีวิดีโอแพค</div>' : '') +
+      (i.warnings ? i.warnings.filter(function (w) { return w.indexOf('วิดีโอ') < 0; }).map(function (w) { return '<div class="warn">⚠ ' + esc(w) + '</div>'; }).join('') : '') +
+      (editing ? '<div class="edit">' +
+        '<label>เลข track ของขนส่ง</label><input data-f="courierTrackingNo" value="' + esc(i.courierTrackingNo) + '">' +
+        '<div class="grid2"><div><label>จำนวนลัง</label><input data-f="boxCount" type="number" inputmode="numeric" min="1" step="1" value="' + esc(i.boxCount || 1) + '"></div>' +
+        '<div><label>ค่าส่ง (บาท)</label><input data-f="shippingCost" type="number" inputmode="decimal" step="0.01" value="' + esc(i.shippingCost) + '"></div></div>' +
+        '<label>หมายเหตุ</label><input data-f="note" value="' + esc(i.note) + '">' +
+        '<div class="thumbs">' + photos.map(thumbHtml).join('') + '</div>' +
+        '<div class="row">' +
+          '<button class="small primary" data-act="save">บันทึก</button>' +
+          '<button class="small" data-act="photo">📷 รูปออเดอร์นี้</button>' +
+          (i.publicUrl ? '<button class="small" data-act="copy">คัดลอกลิงก์</button>' : '') +
+          (open ? '<button class="small" data-act="remove" style="color:var(--bad)">เอาออกจากรอบ</button>' : '') +
+        '</div></div>' : '') +
+      '</div>';
+  }).join('') || '<div class="muted" style="margin-top:8px">ยังไม่มีออเดอร์ สแกนเลข track เพื่อเพิ่ม</div>';
+}
+
+$('items').addEventListener('click', async function (e) {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const row = btn.closest('[data-item]');
+  const item = state.items.find(function (i) { return i.id === row.getAttribute('data-item'); });
+  const act = btn.getAttribute('data-act');
+  if (act === 'edit') { state.editingId = state.editingId === item.id ? null : item.id; renderItems(); return; }
+  if (act === 'copy') { copyText(item.publicUrl); return; }
+  if (act === 'photo') { pickPhotos(item.shipmentId); return; }
+  if (act === 'save') {
+    const v = {};
+    row.querySelectorAll('[data-f]').forEach(function (inp) { v[inp.getAttribute('data-f')] = inp.value; });
+    btn.disabled = true;
+    try {
+      await api('updateItem', Object.assign({ itemId: item.id }, v));
+      Object.assign(item, {
+        courierTrackingNo: v.courierTrackingNo.toUpperCase(),
+        shippingCost: v.shippingCost === '' ? '' : Number(v.shippingCost),
+        boxCount: Math.max(1, Math.floor(Number(v.boxCount)) || 1),
+        note: v.note,
+      });
+      state.editingId = null;
+      renderItems();
+      toast('บันทึกแล้ว');
+    } catch (err) { toast(err.message, 'bad'); btn.disabled = false; }
+    return;
+  }
+  if (act === 'remove') {
+    if (!confirm('เอา ' + item.trackingNo + ' ออกจากรอบนี้?\nสถานะของออเดอร์จะกลับเป็นค่าเดิม')) return;
+    btn.disabled = true;
+    try {
+      await api('removeItem', { itemId: item.id });
+      state.items = state.items.filter(function (i) { return i !== item; });
+      state.editingId = null;
+      renderBatch();
+      toast('เอาออกแล้ว');
+    } catch (err) { toast(err.message, 'bad'); btn.disabled = false; }
+  }
+});
+
+// ------------------------------------------------------------------ scanning
+function focusScan() {
+  if (state.batch && state.batch.open && $('cam').classList.contains('hidden') && $('platModal').classList.contains('hidden')) {
+    setTimeout(function () { $('scan').focus({ preventScroll: true }); }, 0);
+  }
+}
+$('scan').addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const v = this.value;
+  this.value = '';
+  enqueueScan(v);
+});
+// แตะที่ว่างแล้วช่องสแกนหลุดโฟกัส ให้กลับมาที่ช่องสแกน (เครื่องสแกนพิมพ์ลงช่องที่โฟกัสอยู่)
+$('scan').addEventListener('blur', function () {
+  setTimeout(function () {
+    const a = document.activeElement;
+    if (!$('vBatch').classList.contains('hidden') && (!a || a === document.body)) focusScan();
+  }, 300);
+});
+$('btnKbd').onclick = function () {
+  // เปิดคีย์บอร์ดมือถือไว้พิมพ์เลขเอง
+  const s = $('scan');
+  s.setAttribute('inputmode', 'text');
+  s.blur();
+  setTimeout(function () { s.focus(); }, 50);
+  s.addEventListener('blur', function () { s.setAttribute('inputmode', 'none'); }, { once: true });
+};
+
+// สแกนต่อกันได้ไม่ต้องรอ: ส่งเข้าคิวแล้วทำทีละเลขตามลำดับ
+function enqueueScan(raw) {
+  const code = normCode(raw);
+  if (!code || !state.batch || !state.batch.open) return;
+  if (state.items.some(function (i) { return i.trackingNo === code; })) {
+    toast(code + ' อยู่ในรอบนี้แล้ว', 'warn');
+    buzz([60, 60, 60]);
+    return;
+  }
+  // มีหน้าต่างเลือกแพลตฟอร์มค้างอยู่ = ยืนยันค่าที่เลือกไว้ แล้วไปเลขถัดไป
+  if (!$('platModal').classList.contains('hidden')) platResolve(true);
+  state.pendingCount++;
+  updatePending();
+  state.chain = state.chain.then(function () { return processScan(code); }).catch(function () {}).then(function () {
+    state.pendingCount--;
+    updatePending();
+  });
+}
+function updatePending() {
+  $('pending').textContent = state.pendingCount > 0 ? 'กำลังบันทึก ' + state.pendingCount + ' รายการ...' : '';
+}
+
+async function processScan(code) {
+  if (state.items.some(function (i) { return i.trackingNo === code; })) return;
+  let chk;
+  try {
+    chk = await api('checkTracking', { code: code });
+  } catch (e) {
+    toast(code + ': ' + e.message, 'bad', 6000);
+    buzz([200, 100, 200]);
+    return;
+  }
+  let platformId = '', carrierId = '';
+  if (!chk.existing) {
+    const rule = matchRule(code);
+    const r = await askPlatform(code, rule);
+    if (!r) { toast('ไม่ได้เพิ่ม ' + code); return; }
+    platformId = r.platformId;
+    carrierId = r.carrierId;
+  }
+  try {
+    const res = await api('scanToBatch', { batchId: state.batch.id, code: code, platformId: platformId, carrierId: carrierId });
+    if (res.duplicate) { toast(code + ' อยู่ในรอบนี้แล้ว', 'warn'); return; }
+    res.item.warnings = res.warnings;
+    state.items.unshift(res.item);
+    renderItems();
+    $('btnSplit').disabled = !(state.batch.tripCost > 0);
+    const w = res.warnings.filter(function (x) { return x.indexOf('วิดีโอ') < 0; });
+    if (w.length) { toast(code + ': ' + w.join(' · '), 'warn', 5000); buzz([80, 60, 80]); }
+    else { toast('✓ ' + code); buzz(60); }
+  } catch (e) {
+    toast(code + ': ' + e.message, 'bad', 6000);
+    buzz([200, 100, 200]);
+  }
+}
+
+// ------------------------------------------------------------------ platform popup
+let platSel = '', carSel = '', platResolver = null;
+function askPlatform(code, rule) {
+  return new Promise(function (resolve) {
+    platSel = rule ? rule.suggestPlatformId : 'OTHER';
+    carSel = rule ? rule.carrierId : (state.batch.carrierId || '');
+    $('platCode').textContent = code;
+    $('platWarn').textContent = rule ? '' : 'บาร์โค้ดไม่ตรงรูปแบบเลข track ที่รู้จัก ตรวจว่าสแกนถูกอันไหม';
+    renderPlatChoices();
+    show('platModal', true);
+    buzz(rule ? 60 : [200, 100, 200]);
+    platResolver = function (ok) {
+      show('platModal', false);
+      platResolver = null;
+      resolve(ok ? { platformId: platSel, carrierId: carSel } : null);
+      focusScan();
+    };
+  });
+}
+function platResolve(ok) { if (platResolver) platResolver(ok); }
+function chipButtons(list, sel) {
+  return list.map(function (p) { return '<button type="button" data-id="' + esc(p.id) + '" class="' + (p.id === sel ? 'sel' : '') + '">' + esc(p.name) + '</button>'; }).join('');
+}
+function renderPlatChoices() {
+  $('plats').innerHTML = chipButtons(state.boot.platforms, platSel);
+  $('cars').innerHTML = chipButtons(state.boot.carriers, carSel);
+}
+$('plats').addEventListener('click', function (e) { const b = e.target.closest('button'); if (b) { platSel = b.getAttribute('data-id'); renderPlatChoices(); } });
+$('cars').addEventListener('click', function (e) { const b = e.target.closest('button'); if (b) { carSel = b.getAttribute('data-id'); renderPlatChoices(); } });
+$('btnPlatOk').onclick = function () { platResolve(true); };
+$('btnPlatCancel').onclick = function () { platResolve(false); };
+
+// ------------------------------------------------------------------ camera scanner
+let qr = null, lastCode = '', lastAt = 0;
+function loadScript(src) {
+  return new Promise(function (resolve, reject) {
+    if (window.Html5Qrcode) return resolve();
+    const s = document.createElement('script');
+    s.src = src; s.onload = resolve; s.onerror = function () { reject(new Error('โหลดตัวสแกนไม่ได้ ตรวจอินเทอร์เน็ต')); };
+    document.head.appendChild(s);
+  });
+}
+$('btnCam').onclick = async function () {
+  try {
+    await loadScript(QR_LIB);
+    show('cam', true);
+    qr = new Html5Qrcode('camBox', { verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+    const w = Math.min(window.innerWidth - 40, 360);
+    await qr.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: w, height: Math.round(w * 0.6) } }, function (text) {
+      const now = Date.now();
+      const code = normCode(text);
+      if (code === lastCode && now - lastAt < SAME_CODE_MS) return;
+      lastCode = code; lastAt = now;
+      $('camMsg').textContent = 'อ่านได้: ' + code;
+      enqueueScan(text);
+    }, function () {});
+  } catch (e) {
+    closeCam();
+    toast('เปิดกล้องไม่ได้: ' + (e.message || e), 'bad', 6000);
+  }
+};
+async function closeCam() {
+  if (qr) { try { await qr.stop(); } catch (e) {} try { qr.clear(); } catch (e) {} qr = null; }
+  show('cam', false);
+  $('camMsg').textContent = 'เล็งบาร์โค้ดหรือ QR ให้อยู่ในกรอบ';
+  focusScan();
+}
+$('btnCamClose').onclick = closeCam;
+
+// ------------------------------------------------------------------ photos
+function renderPhotoTypes() {
+  $('photoTypes').innerHTML = PHOTO_TYPES.map(function (t) {
+    return '<button type="button" data-t="' + esc(t) + '" class="' + (t === state.photoType ? 'sel' : '') + '">' + esc(t) + '</button>';
+  }).join('');
+}
+$('photoTypes').addEventListener('click', function (e) {
+  const b = e.target.closest('button');
+  if (!b) return;
+  state.photoType = b.getAttribute('data-t');
+  renderPhotoTypes();
+});
+function thumbHtml(p) {
+  const src = state.thumbs[p.id] || (p.showPublic ? 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(p.fileId) + '&sz=w300' : '');
+  return '<div class="thumb' + (p.showPublic ? '' : ' private') + '" data-photo="' + esc(p.id) + '">' +
+    (src ? '<img src="' + esc(src) + '" alt="">' : '<div class="ph">🔒 รูป</div>') +
+    '<div class="cap">' + esc(p.type) + (p.showPublic ? '' : ' · ไม่โชว์') + '</div>' +
+    '<div class="acts"><button data-pact="toggle">' + (p.showPublic ? 'ซ่อน' : 'โชว์') + '</button><button data-pact="del">ลบ</button></div></div>';
+}
+function renderPhotos() {
+  $('batchPhotos').innerHTML = state.photos.filter(function (p) { return !p.shipmentId; }).map(thumbHtml).join('');
+}
+document.addEventListener('click', async function (e) {
+  const btn = e.target.closest('button[data-pact]');
+  if (!btn) return;
+  const id = btn.closest('[data-photo]').getAttribute('data-photo');
+  const p = state.photos.find(function (x) { return x.id === id; });
+  btn.disabled = true;
+  try {
+    if (btn.getAttribute('data-pact') === 'toggle') {
+      await api('setPhotoPublic', { attachId: id, showPublic: !p.showPublic });
+      p.showPublic = !p.showPublic;
+    } else {
+      if (!confirm('ลบรูปนี้?')) { btn.disabled = false; return; }
+      await api('deletePhoto', { attachId: id });
+      state.photos = state.photos.filter(function (x) { return x !== p; });
+    }
+    renderPhotos(); renderItems();
+  } catch (err) { toast(err.message, 'bad'); btn.disabled = false; }
+});
+
+$('btnBatchPhoto').onclick = function () { pickPhotos(null); };
+function pickPhotos(shipmentId) {
+  state.photoTarget = shipmentId;
+  $('filePick').value = '';
+  $('filePick').click();
+}
+$('filePick').onchange = async function () {
+  const files = Array.prototype.slice.call(this.files || []);
+  if (!files.length) return;
+  const target = state.photoTarget;
+  const type = target ? 'สินค้า' : state.photoType;
+  const pub = $('photoPublic').checked;
+  for (let n = 0; n < files.length; n++) {
+    toast('กำลังอัปโหลดรูป ' + (n + 1) + '/' + files.length + '...', '', 20000);
+    try {
+      const blob = await shrink(files[n]);
+      const data = await blobToB64(blob);
+      const a = await api('uploadPhoto', { batchId: state.batch.id, shipmentId: target || '', attachType: type, showPublic: pub, data: data });
+      state.thumbs[a.id] = URL.createObjectURL(blob);
+      state.photos.push(a);
+      renderPhotos(); renderItems();
+    } catch (e) {
+      toast('อัปโหลดรูปไม่สำเร็จ: ' + e.message, 'bad', 6000);
+      return;
+    }
+  }
+  toast('อัปโหลดรูปแล้ว ' + files.length + ' รูป');
+  focusScan();
+};
+
+// ย่อรูปให้ด้านยาวไม่เกิน PHOTO_MAX แล้วแปลงเป็น JPEG เพื่อประหยัดพื้นที่และเวลาอัปโหลด
+async function shrink(file) {
+  let img;
+  try { img = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+  catch (e) {
+    img = await new Promise(function (resolve, reject) {
+      const i = new Image();
+      i.onload = function () { resolve(i); };
+      i.onerror = function () { reject(new Error('อ่านรูปไม่ได้')); };
+      i.src = URL.createObjectURL(file);
+    });
+  }
+  const w = img.width, h = img.height;
+  const k = Math.min(1, PHOTO_MAX / Math.max(w, h));
+  const c = document.createElement('canvas');
+  c.width = Math.round(w * k); c.height = Math.round(h * k);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return new Promise(function (resolve) { c.toBlob(resolve, 'image/jpeg', PHOTO_QUALITY); });
+}
+function blobToB64(blob) {
+  return new Promise(function (resolve, reject) {
+    const r = new FileReader();
+    r.onload = function () { resolve(String(r.result).split(',')[1] || ''); };
+    r.onerror = function () { reject(r.error); };
+    r.readAsDataURL(blob);
+  });
+}
+
+// ------------------------------------------------------------------ footer
+// แบ่งค่าเหมารถตามน้ำหนัก (จำนวนลัง หรือ 1 เท่ากันทุกออเดอร์) คิดเป็นสตางค์
+// เศษไปอยู่รายการสุดท้าย ยอดรวมจึงตรงกับค่าเหมารถพอดี
+function splitByWeight(total, weights) {
+  const satang = Math.round(total * 100);
+  const sumW = weights.reduce(function (a, w) { return a + w; }, 0) || 1;
+  let used = 0;
+  return weights.map(function (w, i) {
+    const v = i === weights.length - 1 ? satang - used : Math.floor(satang * w / sumW);
+    used += v;
+    return v / 100;
+  });
+}
+function openCostSheet() {
+  const b = state.batch;
+  // ออเดอร์ที่มีค่าส่งอยู่แล้วใช้ค่าเดิม ถ้ายังไม่มีเลยสักออเดอร์ให้เติมค่าเฉลี่ยตามจำนวนลัง
+  const anySet = state.items.some(function (i) { return i.shippingCost !== ''; });
+  const init = splitByWeight(b.tripCost, state.items.map(function (i) { return i.boxCount || 1; }));
+  $('costRows').innerHTML = state.items.map(function (i, k) {
+    const v = anySet ? i.shippingCost : init[k];
+    return '<div class="grid2" data-row="' + esc(i.id) + '" style="grid-template-columns:1fr 70px 110px;align-items:center;margin-top:6px">' +
+      '<div style="word-break:break-all;font-size:14px"><b>' + esc(i.trackingNo) + '</b></div>' +
+      '<input type="number" inputmode="numeric" step="1" min="1" data-box value="' + esc(i.boxCount || 1) + '">' +
+      '<input type="number" inputmode="decimal" step="0.01" min="0" data-cost value="' + esc(v) + '"></div>';
+  }).join('');
+  updateCostSum();
+  show('costModal', true);
+}
+function costRows() {
+  return Array.prototype.slice.call($('costRows').querySelectorAll('[data-row]')).map(function (r) {
+    return { itemId: r.getAttribute('data-row'), box: r.querySelector('[data-box]'), cost: r.querySelector('[data-cost]') };
+  });
+}
+function boxOf(inp) { const n = Math.floor(Number(inp.value)); return n >= 1 ? n : 1; }
+function updateCostSum() {
+  const total = Number(state.batch.tripCost) || 0;
+  const rows = costRows();
+  const sum = rows.reduce(function (a, r) { return a + (Number(r.cost.value) || 0); }, 0);
+  const boxes = rows.reduce(function (a, r) { return a + boxOf(r.box); }, 0);
+  const diff = Math.round((total - sum) * 100) / 100;
+  $('costSumBox').innerHTML = 'รวม ' + boxes + ' ลัง · ค่าส่ง <b>' + money(sum) + '</b> / ค่าเหมารถ ' + money(total) + ' บาท<br>' +
+    (diff === 0 ? '<span style="color:var(--ok)">✓ ตรงกับค่าเหมารถ</span>'
+      : diff > 0 ? '<span style="color:var(--warn)">ยังเหลือ ' + money(diff) + ' บาท</span>'
+      : '<span style="color:var(--bad)">เกิน ' + money(-diff) + ' บาท</span>');
+}
+function fillSplit(byBox) {
+  const rows = costRows();
+  const v = splitByWeight(state.batch.tripCost, rows.map(function (r) { return byBox ? boxOf(r.box) : 1; }));
+  rows.forEach(function (r, k) { r.cost.value = v[k]; });
+  updateCostSum();
+}
+$('costRows').addEventListener('input', updateCostSum);
+$('btnSplit').onclick = openCostSheet;
+$('btnCostByBox').onclick = function () { fillSplit(true); };
+$('btnCostAvg').onclick = function () { fillSplit(false); };
+$('btnCostCancel').onclick = function () { show('costModal', false); focusScan(); };
+$('btnCostSave').onclick = async function () {
+  const total = Number(state.batch.tripCost) || 0;
+  const costs = costRows().map(function (r) { return { itemId: r.itemId, cost: r.cost.value, boxCount: boxOf(r.box) }; });
+  const sum = costs.reduce(function (a, c) { return a + (Number(c.cost) || 0); }, 0);
+  if (Math.round(sum * 100) !== Math.round(total * 100) &&
+      !confirm('ยอดรวม ' + money(sum) + ' บาท ไม่ตรงกับค่าเหมารถ ' + money(total) + ' บาท\nบันทึกต่อหรือไม่?')) return;
+  this.disabled = true;
+  try {
+    await api('setItemCosts', { batchId: state.batch.id, costs: costs });
+    costs.forEach(function (c) {
+      const it = state.items.find(function (i) { return i.id === c.itemId; });
+      if (it) { it.shippingCost = c.cost === '' ? '' : Number(c.cost); it.costNote = 'ค่าเหมารถ'; it.boxCount = c.boxCount; }
+    });
+    show('costModal', false);
+    renderItems();
+    toast('บันทึกค่าส่งแล้ว');
+    focusScan();
+  } catch (e) { toast(e.message, 'bad'); }
+  this.disabled = false;
+};
+$('btnClose').onclick = async function () {
+  if (state.pendingCount > 0) { toast('รอบันทึกรายการที่สแกนให้เสร็จก่อน', 'warn'); return; }
+  if (!confirm('ปิดรอบนี้? (' + state.items.length + ' ออเดอร์)\nปิดแล้วจะสแกนเพิ่มไม่ได้')) return;
+  this.disabled = true;
+  try {
+    await api('closeBatch', { batchId: state.batch.id });
+    toast('ปิดรอบแล้ว');
+    await gotoHome();
+  } catch (e) { toast(e.message, 'bad'); }
+  this.disabled = false;
+};
+
+window.addEventListener('beforeunload', function (e) {
+  if (state.pendingCount > 0) { e.preventDefault(); e.returnValue = ''; }
+});
+
+// ------------------------------------------------------------------ start
+(async function init() {
+  if (!state.token) return gotoLogin();
+  try { await afterLogin(); }
+  catch (e) { if (e.code !== 'AUTH') { gotoLogin(); $('loginErr').textContent = e.message; } }
+})();
+</script>
+</body>
+</html>
