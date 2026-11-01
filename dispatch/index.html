@@ -131,8 +131,12 @@
       <label>รายละเอียดเพิ่มเติม / สาเหตุตีคืน</label>
       <textarea id="fDetails" rows="2"></textarea>
       <div class="muted" style="margin-top:8px">ไม่บังคับกรอก ยกเว้นสถานะ</div>
-      <div class="row"><button id="btnFormCancel">ยกเลิก</button><button class="primary" id="btnFormSave">บันทึก</button></div>
+      <div class="row"><button id="btnFormCancel">ปิดหน้านี้</button><button class="primary" id="btnFormSave">บันทึก</button></div>
       <div id="formErr" class="err"></div>
+      <div id="cancelBox" class="hidden" style="margin-top:18px;border-top:1px solid var(--line);padding-top:12px">
+        <div class="muted">เปิดรอบผิด? ยกเลิกรอบนี้ทั้งรอบ: ออเดอร์ที่สแกนแล้วจะกลับเป็นสถานะเดิม และรูปของรอบจะถูกลบ</div>
+        <div class="row"><button class="danger" id="btnCancelBatch">ยกเลิกรอบนี้</button></div>
+      </div>
     </div>
   </section>
 
@@ -447,6 +451,7 @@ $('btnFormCancel').onclick = function () { if (state.batch) view('vBatch'); else
 function openForm(b) {
   $('formTitle').textContent = b ? 'แก้ไขรอบส่ง' : 'เปิดรอบใหม่';
   $('formErr').textContent = '';
+  show('cancelBox', !!(b && b.open));
   // สถานะ "แพคเสร็จ" มาจากสถานีแพคเท่านั้น
   const sts = state.boot.statuses.filter(function (s) { return s.id !== 'ST-PACKED'; });
   formStatus = b ? b.statusId : (sts.find(function (s) { return s.id === 'ST-SHIPPED'; }) || sts[0] || {}).id;
@@ -488,6 +493,19 @@ $('btnFormSave').onclick = async function () {
     const b = await api('saveBatch', { batchId: editing ? state.batch.id : '', batch: data });
     await openBatch(b.id);
     toast(editing ? 'บันทึกแล้ว' : 'เปิดรอบแล้ว เริ่มสแกนได้เลย');
+  } catch (e) { $('formErr').textContent = e.message; }
+  this.disabled = false;
+};
+
+$('btnCancelBatch').onclick = async function () {
+  const b = state.batch;
+  if (state.pendingCount > 0) { toast('รอบันทึกรายการที่สแกนให้เสร็จก่อน', 'warn'); return; }
+  if (!confirm('ยกเลิกรอบนี้?\n' + state.items.length + ' ออเดอร์จะกลับเป็นสถานะเดิม และรูปของรอบจะถูกลบ\nย้อนกลับไม่ได้')) return;
+  this.disabled = true;
+  try {
+    const r = await api('cancelBatch', { batchId: b.id });
+    toast('ยกเลิกรอบแล้ว (' + r.items + ' ออเดอร์, ' + r.photos + ' รูป)');
+    await gotoHome();
   } catch (e) { $('formErr').textContent = e.message; }
   this.disabled = false;
 };
@@ -538,7 +556,9 @@ function renderItems() {
     const editing = state.editingId === i.id;
     return '<div class="item" data-item="' + esc(i.id) + '">' +
       '<div class="top"><b>' + esc(i.trackingNo) + '</b>' +
-      '<button class="small" data-act="edit">' + (editing ? 'ปิด' : 'รายละเอียด') + '</button></div>' +
+      '<button class="small" data-act="edit">' + (editing ? 'ปิด' : 'รายละเอียด') + '</button>' +
+      (open ? '<button class="small" data-act="remove" style="color:var(--bad);border-color:#fca5a5" aria-label="ลบออกจากรอบ">ลบ</button>' : '') +
+      '</div>' +
       '<div class="muted">' + esc([i.scannedAt, nameOf(state.boot.platforms, i.platformId), nameOf(state.boot.carriers, i.carrierId)].filter(Boolean).join(' · ')) +
       ' · ' + (i.boxCount || 1) + ' ลัง' +
       (i.shippingCost !== '' ? ' · ค่าส่ง ' + money(i.shippingCost) : '') +
@@ -556,7 +576,6 @@ function renderItems() {
           '<button class="small primary" data-act="save">บันทึก</button>' +
           '<button class="small" data-act="photo">📷 รูปออเดอร์นี้</button>' +
           (i.publicUrl ? '<button class="small" data-act="copy">คัดลอกลิงก์</button>' : '') +
-          (open ? '<button class="small" data-act="remove" style="color:var(--bad)">เอาออกจากรอบ</button>' : '') +
         '</div></div>' : '') +
       '</div>';
   }).join('') || '<div class="muted" style="margin-top:8px">ยังไม่มีออเดอร์ สแกนเลข track เพื่อเพิ่ม</div>';
@@ -590,7 +609,7 @@ $('items').addEventListener('click', async function (e) {
     return;
   }
   if (act === 'remove') {
-    if (!confirm('เอา ' + item.trackingNo + ' ออกจากรอบนี้?\nสถานะของออเดอร์จะกลับเป็นค่าเดิม')) return;
+    if (!confirm('ลบ ' + item.trackingNo + ' ออกจากรอบนี้?\nสถานะของออเดอร์จะกลับเป็นค่าเดิม')) return;
     btn.disabled = true;
     try {
       await api('removeItem', { itemId: item.id });
@@ -956,3 +975,4 @@ window.addEventListener('beforeunload', function (e) {
 </script>
 </body>
 </html>
+
