@@ -74,7 +74,7 @@ function renderAttempt(a, many) {
   }
 
   a.dispatches.forEach(function (d) {
-    h += '<h2>ข้อมูลการจัดส่ง</h2><div class="grid">' +
+    h += '<h2>' + esc(d.title || 'ข้อมูลการจัดส่ง') + (d.date ? ' · ' + esc(d.date) : '') + '</h2><div class="grid">' +
          row('วันที่ส่ง', d.date) + row('ขนส่ง', d.carrier) + row('บริษัทขนส่ง', d.courierName) +
          row('เบอร์ขนส่ง', d.courierPhone) + row('เลข track ขนส่ง', d.courierTrackingNo) + row('เลขบิล', d.billNo) + row('จำนวนลัง', d.boxCount) +
          row('ทะเบียนรถ', d.vehiclePlate) + row('คนขับ', d.driverName) + row('เบอร์คนขับ', d.driverPhone) +
@@ -130,3 +130,4 @@ function renderAttempt(a, many) {
 </script>
 </body>
 </html>
+
