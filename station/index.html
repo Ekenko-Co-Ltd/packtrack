@@ -12,6 +12,9 @@
   header b { font-size:17px; }
   header .sp { flex:1; }
   header button { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.5); }
+  .mode { display:inline-flex; border:1px solid rgba(255,255,255,.5); border-radius:8px; overflow:hidden; }
+  .mode span, .mode a { padding:7px 14px; color:#fff; text-decoration:none; font-weight:600; }
+  .mode .on { background:#fff; color:var(--accent); }
   button { font:inherit; border-radius:8px; border:1px solid var(--line); background:#fff; padding:8px 14px; cursor:pointer; }
   button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
   button.danger { background:var(--bad); color:#fff; border-color:var(--bad); }
@@ -53,7 +56,7 @@
 <body>
 
 <header id="hdr" class="hidden">
-  <b>PackTrack สถานีแพค</b>
+  <nav class="mode"><span class="on">แพคของ</span><a id="goDispatch" href="../dispatch/">จัดส่ง</a></nav>
   <span id="hdrCtx" class="muted" style="color:#dbeafe"></span>
   <span class="sp"></span>
   <span id="hdrQueue"></span>
@@ -139,6 +142,15 @@
     <div class="card">
       <b>รายการล่าสุด</b> <span class="muted" id="queueInfo"></span>
       <div id="recent" class="list"></div>
+    </div>
+
+    <div class="card">
+      <b>ค้นหาคลิปเพื่อดูหรือลบ</b>
+      <div class="row">
+        <input id="clipCode" placeholder="เลข track" autocomplete="off" spellcheck="false" style="flex:1;min-width:0">
+        <button id="btnClipFind">ค้นหา</button>
+      </div>
+      <div id="clipList" class="list"></div>
     </div>
   </div>
 </section>
@@ -234,9 +246,22 @@ function toast(msg, ms) {
   toastTimer = setTimeout(function () { t.classList.add('hidden'); }, ms || 3500);
 }
 function uid() { return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
-// QR ใบขาย Ecount "E040206/20261031/6" เก็บเป็น "EC-20261031-6" (ต้องตรงกับ normCode_ ใน Code.gs)
+// แป้นพิมพ์ไทย (เกษมณี) -> ตัวอักษรที่เครื่องสแกนตั้งใจส่ง (ต้องตรงกับ THAI_KEYS ใน Code.gs)
+const THAI_KEYS = {
+  'ๅ': '1', '/': '2', '-': '3', 'ภ': '4', 'ถ': '5', 'ุ': '6', 'ึ': '7', 'ค': '8', 'ต': '9', 'จ': '0', 'ข': '-', 'ฝ': '/',
+  '๐': 'Q', '"': 'W', 'ฎ': 'E', 'ฑ': 'R', 'ธ': 'T', 'ํ': 'Y', '๊': 'U', 'ณ': 'I', 'ฯ': 'O', 'ญ': 'P',
+  'ฤ': 'A', 'ฆ': 'S', 'ฏ': 'D', 'โ': 'F', 'ฌ': 'G', '็': 'H', '๋': 'J', 'ษ': 'K', 'ศ': 'L',
+  '(': 'Z', ')': 'X', 'ฉ': 'C', 'ฮ': 'V', 'ฺ': 'B', '์': 'N', '?': 'M',
+  'ๆ': 'Q', 'ไ': 'W', 'ำ': 'E', 'พ': 'R', 'ะ': 'T', 'ั': 'Y', 'ี': 'U', 'ร': 'I', 'น': 'O', 'ย': 'P',
+  'ฟ': 'A', 'ห': 'S', 'ก': 'D', 'ด': 'F', 'เ': 'G', '้': 'H', '่': 'J', 'า': 'K', 'ส': 'L',
+  'ผ': 'Z', 'ป': 'X', 'แ': 'C', 'อ': 'V', 'ิ': 'B', 'ื': 'N', 'ท': 'M',
+};
+// สแกนตอนแป้นพิมพ์เป็นภาษาไทยให้แปลงกลับ และ QR ใบขาย Ecount "E040206/20261031/6" เก็บเป็น "EC-20261031-6"
+// (ต้องตรงกับ normCode_ ใน Code.gs)
 function normCode(v) {
-  const s = String(v || '').replace(/\s+/g, '').toUpperCase();
+  let s = String(v || '').replace(/\s+/g, '');
+  if (/[฀-๿]/.test(s)) s = s.split('').map(function (c) { return THAI_KEYS[c] || c; }).join('');
+  s = s.toUpperCase();
   const m = s.match(/^E040206\/(\d{8})\/(\d+)$/);
   return m ? 'EC-' + m[1] + '-' + m[2] : s;
 }
@@ -727,16 +752,58 @@ function renderRecent() {
   }).join('') || '<div class="muted">ยังไม่มีรายการ</div>';
 }
 
-// พนักงานลบคลิปของตัวเองได้ภายใน selfDeleteMinutes (เซิร์ฟเวอร์ตรวจซ้ำอีกชั้น), Admin ลบได้ตลอด
+// เซิร์ฟเวอร์ตรวจสิทธิ์บริษัท/สาขาอีกชั้นตอนกดลบ
 function canDelete(r) {
-  if (r.status !== 'done' || !r.sessionId || !state.boot) return false;
-  const u = state.boot.user;
-  if (u.role === 'Admin') return true;
-  const limit = (state.boot.selfDeleteMinutes || 30) * 60000;
-  return r.by === u.email && Date.now() - new Date(r.endAt).getTime() < limit;
+  return r.status === 'done' && !!r.sessionId;
 }
-// ซ่อนปุ่มลบเมื่อหมดเวลา
-setInterval(function () { if (!$('vStation').classList.contains('hidden')) renderRecent(); }, 60000);
+
+// ค้นหาคลิปเก่าจากเลข track (รายการล่าสุดเก็บแค่ในเครื่องนี้ 30 รายการ)
+let clipSearch = '';
+async function findClips(code) {
+  clipSearch = normCode(code);
+  if (!clipSearch) return;
+  $('clipList').innerHTML = '<div class="muted">กำลังค้นหา...</div>';
+  try {
+    const r = await api('listClips', { code: clipSearch });
+    $('clipList').innerHTML = r.clips.map(function (c) {
+      return '<div class="item"><div class="t"><b>' + esc(c.at) + '</b><div class="muted">' + mmss(c.sec * 1000) + ' · ' + esc(c.packer) + '</div></div>' +
+        '<a href="' + esc(c.videoUrl) + '" target="_blank" rel="noopener">ดูวิดีโอ</a>' +
+        '<button tabindex="-1" class="del" data-sid="' + esc(c.sessionId) + '">ลบ</button></div>';
+    }).join('') || '<div class="muted" style="margin-top:8px">' + (r.found ? 'เลขนี้ไม่มีคลิปเหลืออยู่' : 'ไม่พบเลขนี้ในระบบ') + '</div>';
+  } catch (e) {
+    $('clipList').innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+  }
+}
+$('btnClipFind').onclick = function () { findClips($('clipCode').value).then(focusScan); };
+$('clipCode').addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  findClips(this.value).then(focusScan);
+});
+$('clipList').addEventListener('click', async function (e) {
+  const b = e.target.closest('button[data-sid]');
+  if (!b || !confirm('ลบวิดีโอ ' + clipSearch + ' ?\nไฟล์จะถูกลบออกจาก Drive และลูกค้าจะดูวิดีโอนี้ไม่ได้')) return;
+  const sid = b.getAttribute('data-sid');
+  b.disabled = true;
+  try {
+    await api('deleteVideo', { sessionId: sid });
+    const r = state.recent.find(function (x) { return x.sessionId === sid; });
+    if (r) setRecent(r.id, { status: 'del', label: 'ลบแล้ว' });
+    toast('ลบวิดีโอแล้ว');
+    await findClips(clipSearch);
+  } catch (err) {
+    toast('ลบไม่สำเร็จ: ' + err.message, 6000);
+    b.disabled = false;
+  }
+  focusScan();
+});
+
+// สลับไปหน้าจัดส่ง ใช้การเข้าสู่ระบบเดิม
+$('goDispatch').addEventListener('click', function (e) {
+  if (state.rec) { e.preventDefault(); toast('กรุณาหยุดอัดก่อนสลับหน้า'); return; }
+  if (state.pumping && !confirm('ยังอัปโหลดวิดีโอไม่เสร็จ คลิปจะอัปโหลดต่อเมื่อกลับมาหน้านี้\nสลับหน้าเลยไหม?')) { e.preventDefault(); return; }
+  state.leaving = true;
+});
 
 async function deleteRecent(id) {
   const r = state.recent.find(function (x) { return x.id === id; });
@@ -758,7 +825,7 @@ $('recent').addEventListener('click', function (e) {
 });
 
 window.addEventListener('beforeunload', function (e) {
-  if (state.rec || state.pumping) { e.preventDefault(); e.returnValue = ''; }
+  if (!state.leaving && (state.rec || state.pumping)) { e.preventDefault(); e.returnValue = ''; }
 });
 window.addEventListener('online', function () { pumpQueue(); });
 
@@ -775,4 +842,5 @@ window.addEventListener('online', function () { pumpQueue(); });
 </script>
 </body>
 </html>
+
 
