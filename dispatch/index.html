@@ -9,7 +9,12 @@
   :root { --bg:#f3f4f6; --card:#fff; --text:#111827; --muted:#6b7280; --line:#e5e7eb; --accent:#1f3864; --ok:#16a34a; --warn:#d97706; --bad:#dc2626; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:16px/1.45 "Sarabun","Noto Sans Thai",Arial,sans-serif; padding-bottom:88px; }
-  header { position:sticky; top:0; z-index:5; background:var(--accent); color:#fff; padding:10px 16px; display:flex; gap:10px; align-items:center; }
+  header { position:sticky; top:0; z-index:5; background:var(--accent); color:#fff; padding:10px 16px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .mode { display:inline-flex; border:1px solid rgba(255,255,255,.5); border-radius:8px; overflow:hidden; }
+  .mode span, .mode a { padding:6px 12px; color:#fff; text-decoration:none; font-weight:600; font-size:15px; }
+  .mode .on { background:#fff; color:var(--accent); }
+  .clip { display:flex; gap:8px; align-items:center; border-top:1px solid var(--line); padding:8px 0; font-size:14px; }
+  .clip .t { flex:1; min-width:0; }
   header b { font-size:17px; }
   header .sp { flex:1; }
   header button { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.5); padding:6px 10px; }
@@ -65,7 +70,7 @@
 <body>
 
 <header id="hdr" class="hidden">
-  <b>ส่งออก</b>
+  <nav class="mode"><a id="goStation" href="../station/">แพคของ</a><span class="on">จัดส่ง</span></nav>
   <span id="hdrCtx" class="muted" style="color:#dbeafe"></span>
   <span class="sp"></span>
   <button id="btnHome" class="hidden">รอบทั้งหมด</button>
@@ -193,7 +198,7 @@
 <div class="modal hidden" id="platModal">
   <div class="sheet">
     <b id="platCode"></b>
-    <div class="muted">เลขใหม่ ยังไม่เคยแพค · ตรวจสอบแล้วกดยืนยัน</div>
+    <div class="muted">เลขใหม่ · ตรวจสอบแล้วกดยืนยัน</div>
     <div id="platWarn" class="err"></div>
     <label>แพลตฟอร์ม</label><div id="plats" class="chips"></div>
     <label>การจัดส่ง</label><div id="cars" class="chips"></div>
@@ -288,9 +293,22 @@ function nameOf(list, id) { const x = (list || []).find(function (i) { return i.
 function today() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 function money(n) { return Number(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 }); }
 
-// QR ใบขาย Ecount "E040206/20261031/6" เก็บเป็น "EC-20261031-6" (ต้องตรงกับ normCode_ ใน Code.gs)
+// แป้นพิมพ์ไทย (เกษมณี) -> ตัวอักษรที่เครื่องสแกนตั้งใจส่ง (ต้องตรงกับ THAI_KEYS ใน Code.gs)
+const THAI_KEYS = {
+  'ๅ': '1', '/': '2', '-': '3', 'ภ': '4', 'ถ': '5', 'ุ': '6', 'ึ': '7', 'ค': '8', 'ต': '9', 'จ': '0', 'ข': '-', 'ฝ': '/',
+  '๐': 'Q', '"': 'W', 'ฎ': 'E', 'ฑ': 'R', 'ธ': 'T', 'ํ': 'Y', '๊': 'U', 'ณ': 'I', 'ฯ': 'O', 'ญ': 'P',
+  'ฤ': 'A', 'ฆ': 'S', 'ฏ': 'D', 'โ': 'F', 'ฌ': 'G', '็': 'H', '๋': 'J', 'ษ': 'K', 'ศ': 'L',
+  '(': 'Z', ')': 'X', 'ฉ': 'C', 'ฮ': 'V', 'ฺ': 'B', '์': 'N', '?': 'M',
+  'ๆ': 'Q', 'ไ': 'W', 'ำ': 'E', 'พ': 'R', 'ะ': 'T', 'ั': 'Y', 'ี': 'U', 'ร': 'I', 'น': 'O', 'ย': 'P',
+  'ฟ': 'A', 'ห': 'S', 'ก': 'D', 'ด': 'F', 'เ': 'G', '้': 'H', '่': 'J', 'า': 'K', 'ส': 'L',
+  'ผ': 'Z', 'ป': 'X', 'แ': 'C', 'อ': 'V', 'ิ': 'B', 'ื': 'N', 'ท': 'M',
+};
+// สแกนตอนแป้นพิมพ์เป็นภาษาไทยให้แปลงกลับ และ QR ใบขาย Ecount "E040206/20261031/6" เก็บเป็น "EC-20261031-6"
+// (ต้องตรงกับ normCode_ ใน Code.gs)
 function normCode(v) {
-  const s = String(v || '').replace(/\s+/g, '').toUpperCase();
+  let s = String(v || '').replace(/\s+/g, '');
+  if (/[฀-๿]/.test(s)) s = s.split('').map(function (c) { return THAI_KEYS[c] || c; }).join('');
+  s = s.toUpperCase();
   const m = s.match(/^E040206\/(\d{8})\/(\d+)$/);
   return m ? 'EC-' + m[1] + '-' + m[2] : s;
 }
@@ -451,7 +469,7 @@ $('btnFormCancel').onclick = function () { if (state.batch) view('vBatch'); else
 function openForm(b) {
   $('formTitle').textContent = b ? 'แก้ไขรอบส่ง' : 'เปิดรอบใหม่';
   $('formErr').textContent = '';
-  show('cancelBox', !!(b && b.open));
+  show('cancelBox', !!(b && !b.cancelled));
   // สถานะ "แพคเสร็จ" มาจากสถานีแพคเท่านั้น
   const sts = state.boot.statuses.filter(function (s) { return s.id !== 'ST-PACKED'; });
   formStatus = b ? b.statusId : (sts.find(function (s) { return s.id === 'ST-SHIPPED'; }) || sts[0] || {}).id;
@@ -528,7 +546,7 @@ function renderBatch() {
   const st = state.boot.statuses.find(function (s) { return s.id === b.statusId; }) || {};
   $('bStatus').textContent = st.name || b.statusId;
   $('bStatus').style.background = st.color || '#555';
-  $('bTitle').textContent = batchTitle(b) + (b.open ? '' : ' (ปิดแล้ว)');
+  $('bTitle').textContent = batchTitle(b) + (b.cancelled ? ' (ยกเลิกแล้ว)' : b.open ? '' : ' (ปิดแล้ว)');
   $('bInfo').innerHTML = [
     'วันที่ ' + esc(b.date),
     b.courierPhone ? 'โทร ' + esc(b.courierPhone) : '',
@@ -538,7 +556,7 @@ function renderBatch() {
     b.details ? esc(b.details) : '',
   ].filter(Boolean).join(' · ');
   show('scanCard', b.open);
-  show('btnEdit', b.open);
+  show('btnEdit', !b.cancelled);
   show('footer', b.open);
   $('btnSplit').disabled = !(b.tripCost > 0) || !state.items.length;
   renderPhotoTypes();
@@ -550,21 +568,21 @@ function renderItems() {
   $('itemCount').textContent = '(' + state.items.length + ')';
   const sum = state.items.reduce(function (a, i) { return a + (Number(i.shippingCost) || 0); }, 0);
   $('costSum').textContent = sum ? 'ค่าส่งรวม ' + money(sum) + ' บาท' : '';
-  const open = state.batch.open;
+  const canRemove = !state.batch.cancelled;
   $('items').innerHTML = state.items.map(function (i) {
     const photos = state.photos.filter(function (p) { return p.shipmentId === i.shipmentId; });
     const editing = state.editingId === i.id;
     return '<div class="item" data-item="' + esc(i.id) + '">' +
       '<div class="top"><b>' + esc(i.trackingNo) + '</b>' +
       '<button class="small" data-act="edit">' + (editing ? 'ปิด' : 'รายละเอียด') + '</button>' +
-      (open ? '<button class="small" data-act="remove" style="color:var(--bad);border-color:#fca5a5" aria-label="ลบออกจากรอบ">ลบ</button>' : '') +
+      (canRemove ? '<button class="small" data-act="remove" style="color:var(--bad);border-color:#fca5a5" aria-label="ลบออกจากรอบ">ลบ</button>' : '') +
       '</div>' +
       '<div class="muted">' + esc([i.scannedAt, nameOf(state.boot.platforms, i.platformId), nameOf(state.boot.carriers, i.carrierId)].filter(Boolean).join(' · ')) +
       ' · ' + (i.boxCount || 1) + ' ลัง' +
       (i.shippingCost !== '' ? ' · ค่าส่ง ' + money(i.shippingCost) : '') +
       (i.courierTrackingNo ? ' · track ขนส่ง ' + esc(i.courierTrackingNo) : '') +
       (photos.length ? ' · รูป ' + photos.length : '') + '</div>' +
-      (i.packCount === 0 ? '<div class="warn">⚠ ยังไม่มีวิดีโอแพค</div>' : '') +
+      (i.packCount === 0 ? '<div class="muted">ไม่มีวิดีโอแพค</div>' : '') +
       (i.warnings ? i.warnings.filter(function (w) { return w.indexOf('วิดีโอ') < 0; }).map(function (w) { return '<div class="warn">⚠ ' + esc(w) + '</div>'; }).join('') : '') +
       (editing ? '<div class="edit">' +
         '<label>เลข track ของขนส่ง</label><input data-f="courierTrackingNo" value="' + esc(i.courierTrackingNo) + '">' +
@@ -576,9 +594,26 @@ function renderItems() {
           '<button class="small primary" data-act="save">บันทึก</button>' +
           '<button class="small" data-act="photo">📷 รูปออเดอร์นี้</button>' +
           (i.publicUrl ? '<button class="small" data-act="copy">คัดลอกลิงก์</button>' : '') +
-        '</div></div>' : '') +
+          (i.packCount > 0 ? '<button class="small" data-act="clips">วิดีโอแพค</button>' : '') +
+        '</div>' + clipsHtml(i) + '</div>' : '') +
       '</div>';
   }).join('') || '<div class="muted" style="margin-top:8px">ยังไม่มีออเดอร์ สแกนเลข track เพื่อเพิ่ม</div>';
+}
+
+// คลิปแพคของออเดอร์ที่เปิดรายละเอียดอยู่ (โหลดเมื่อกดปุ่ม "วิดีโอแพค")
+function clipsHtml(i) {
+  if (!i.clips) return '';
+  return '<div style="margin-top:8px">' + (i.clips.map(function (c) {
+    return '<div class="clip"><div class="t"><b>' + esc(c.at) + '</b><div class="muted">' + c.sec + ' วินาที · ' + esc(c.packer) + '</div></div>' +
+      '<a href="' + esc(c.videoUrl) + '" target="_blank" rel="noopener">ดูวิดีโอ</a>' +
+      '<button class="small" data-act="clipdel" data-sid="' + esc(c.sessionId) + '" style="color:var(--bad);border-color:#fca5a5">ลบ</button></div>';
+  }).join('') || '<div class="muted">ไม่มีคลิปเหลืออยู่</div>') + '</div>';
+}
+async function loadClips(item) {
+  const r = await api('listClips', { code: item.trackingNo });
+  item.clips = r.clips;
+  item.packCount = r.clips.length;
+  renderItems();
 }
 
 $('items').addEventListener('click', async function (e) {
@@ -588,6 +623,21 @@ $('items').addEventListener('click', async function (e) {
   const item = state.items.find(function (i) { return i.id === row.getAttribute('data-item'); });
   const act = btn.getAttribute('data-act');
   if (act === 'edit') { state.editingId = state.editingId === item.id ? null : item.id; renderItems(); return; }
+  if (act === 'clips') {
+    btn.disabled = true;
+    try { await loadClips(item); } catch (err) { toast(err.message, 'bad'); btn.disabled = false; }
+    return;
+  }
+  if (act === 'clipdel') {
+    if (!confirm('ลบวิดีโอแพคของ ' + item.trackingNo + ' ?\nไฟล์จะถูกลบออกจาก Drive และลูกค้าจะดูวิดีโอนี้ไม่ได้')) return;
+    btn.disabled = true;
+    try {
+      await api('deleteVideo', { sessionId: btn.getAttribute('data-sid') });
+      await loadClips(item);
+      toast('ลบวิดีโอแล้ว');
+    } catch (err) { toast(err.message, 'bad'); btn.disabled = false; }
+    return;
+  }
   if (act === 'copy') { copyText(item.publicUrl); return; }
   if (act === 'photo') { pickPhotos(item.shipmentId); return; }
   if (act === 'save') {
@@ -962,6 +1012,11 @@ $('btnClose').onclick = async function () {
   this.disabled = false;
 };
 
+// สลับไปหน้าแพคของ ใช้การเข้าสู่ระบบเดิม
+$('goStation').addEventListener('click', function (e) {
+  if (state.pendingCount > 0) { e.preventDefault(); toast('รอบันทึกรายการที่สแกนให้เสร็จก่อน', 'warn'); }
+});
+
 window.addEventListener('beforeunload', function (e) {
   if (state.pendingCount > 0) { e.preventDefault(); e.returnValue = ''; }
 });
@@ -975,4 +1030,5 @@ window.addEventListener('beforeunload', function (e) {
 </script>
 </body>
 </html>
+
 
