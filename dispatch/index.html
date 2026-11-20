@@ -232,6 +232,7 @@
 </div>
 
 <input type="file" id="filePick" accept="image/*" multiple class="hidden">
+<input type="file" id="ocrPick" accept="image/*" capture="environment" class="hidden">
 <div id="toast" class="hidden"></div>
 
 <script>
@@ -578,6 +579,7 @@ function renderItems() {
       (canRemove ? '<button class="small" data-act="remove" style="color:var(--bad);border-color:#fca5a5" aria-label="ลบออกจากรอบ">ลบ</button>' : '') +
       '</div>' +
       '<div class="muted">' + esc([i.scannedAt, nameOf(state.boot.platforms, i.platformId), nameOf(state.boot.carriers, i.carrierId)].filter(Boolean).join(' · ')) +
+      (i.customerName ? ' · ' + esc(i.customerName) + (i.nameAuto ? ' (อ่านจากกล้อง)' : '') : '') +
       ' · ' + (i.boxCount || 1) + ' ลัง' +
       (i.shippingCost !== '' ? ' · ค่าส่ง ' + money(i.shippingCost) : '') +
       (i.courierTrackingNo ? ' · track ขนส่ง ' + esc(i.courierTrackingNo) : '') +
@@ -585,6 +587,9 @@ function renderItems() {
       (i.packCount === 0 ? '<div class="muted">ไม่มีวิดีโอแพค</div>' : '') +
       (i.warnings ? i.warnings.filter(function (w) { return w.indexOf('วิดีโอ') < 0; }).map(function (w) { return '<div class="warn">⚠ ' + esc(w) + '</div>'; }).join('') : '') +
       (editing ? '<div class="edit">' +
+        '<label>ชื่อลูกค้า</label>' +
+        '<div class="row" style="margin-top:0"><input data-f="customerName" value="' + esc(i.customerName) + '" style="flex:3">' +
+        '<button class="small" data-act="ocrphoto" style="flex:2">📷 อ่านชื่อ</button></div>' +
         '<label>เลข track ของขนส่ง</label><input data-f="courierTrackingNo" value="' + esc(i.courierTrackingNo) + '">' +
         '<div class="grid2"><div><label>จำนวนลัง</label><input data-f="boxCount" type="number" inputmode="numeric" min="1" step="1" value="' + esc(i.boxCount || 1) + '"></div>' +
         '<div><label>ค่าส่ง (บาท)</label><input data-f="shippingCost" type="number" inputmode="decimal" step="0.01" value="' + esc(i.shippingCost) + '"></div></div>' +
@@ -623,6 +628,12 @@ $('items').addEventListener('click', async function (e) {
   const item = state.items.find(function (i) { return i.id === row.getAttribute('data-item'); });
   const act = btn.getAttribute('data-act');
   if (act === 'edit') { state.editingId = state.editingId === item.id ? null : item.id; renderItems(); return; }
+  if (act === 'ocrphoto') {
+    ocrTarget = item.id;
+    $('ocrPick').value = '';
+    $('ocrPick').click();
+    return;
+  }
   if (act === 'clips') {
     btn.disabled = true;
     try { await loadClips(item); } catch (err) { toast(err.message, 'bad'); btn.disabled = false; }
@@ -651,6 +662,8 @@ $('items').addEventListener('click', async function (e) {
         shippingCost: v.shippingCost === '' ? '' : Number(v.shippingCost),
         boxCount: Math.max(1, Math.floor(Number(v.boxCount)) || 1),
         note: v.note,
+        customerName: v.customerName.trim(),
+        nameAuto: false,
       });
       state.editingId = null;
       renderItems();
@@ -746,6 +759,9 @@ async function processScan(code) {
     res.item.warnings = res.warnings;
     state.items.unshift(res.item);
     renderItems();
+    const shot = camShots[code];
+    delete camShots[code];
+    if (shot && !res.item.customerName) autoNameFromShot(res.item, shot);
     $('btnSplit').disabled = !(state.batch.tripCost > 0);
     const w = res.warnings.filter(function (x) { return x.indexOf('วิดีโอ') < 0; });
     if (w.length) { toast(code + ': ' + w.join(' · '), 'warn', 5000); buzz([80, 60, 80]); }
@@ -804,10 +820,17 @@ $('btnCam').onclick = async function () {
     show('cam', true);
     qr = new Html5Qrcode('camBox', { verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
     const w = Math.min(window.innerWidth - 40, 360);
-    await qr.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: w, height: Math.round(w * 0.6) } }, function (text) {
+    await qr.start({ facingMode: 'environment' }, {
+      fps: 10,
+      qrbox: { width: w, height: Math.round(w * 0.6) },
+      // ความละเอียดสูงขึ้นเพื่อให้อ่านชื่อผู้รับบนใบปะหน้าได้
+      videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+    }, function (text) {
       const now = Date.now();
       const code = normCode(text);
       if (code === lastCode && now - lastAt < SAME_CODE_MS) return;
+      const shot = camFrameB64();
+      if (shot) camShots[code] = shot;
       lastCode = code; lastAt = now;
       $('camMsg').textContent = 'อ่านได้: ' + code;
       enqueueScan(text);
@@ -1012,6 +1035,51 @@ $('btnClose').onclick = async function () {
   this.disabled = false;
 };
 
+// ------------------------------------------------------------------ customer name (OCR)
+let ocrTarget = null;
+const camShots = {}; // เลข track -> ภาพจากกล้องตอนสแกน (ใช้อ่านชื่อแล้วทิ้ง)
+
+// ภาพจากกล้องสแกน ณ ตอนที่อ่านบาร์โค้ดได้
+function camFrameB64() {
+  const v = document.querySelector('#camBox video');
+  if (!v || v.readyState < 2) return '';
+  const c = document.createElement('canvas');
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.85).split(',')[1] || '';
+}
+
+// สแกนด้วยกล้องแล้วยังไม่มีชื่อ: อ่านจากภาพแล้วบันทึกให้เลย ตรวจ/แก้ได้ที่ปุ่ม "รายละเอียด"
+async function autoNameFromShot(item, b64) {
+  try {
+    const r = await api('ocrLabel', { data: b64 });
+    if (!r.name || item.customerName) return;
+    await api('updateItem', { itemId: item.id, customerName: r.name });
+    item.customerName = r.name;
+    item.nameAuto = true;
+    renderItems();
+  } catch (e) {
+    // อ่านไม่ได้ก็ไม่เป็นไร พิมพ์เองที่รายละเอียดได้
+  }
+}
+
+// ปุ่ม "อ่านชื่อ" ในรายละเอียดออเดอร์: ถ่ายใบปะหน้าแล้วเติมในช่อง ยังไม่บันทึกจนกว่าจะกด "บันทึก"
+$('ocrPick').onchange = async function () {
+  const file = this.files && this.files[0];
+  const id = ocrTarget;
+  if (!file || !id) return;
+  toast('กำลังอ่านชื่อจากภาพ...', '', 20000);
+  try {
+    const data = await blobToB64(await shrink(file));
+    const r = await api('ocrLabel', { data: data });
+    const inp = document.querySelector('[data-item="' + id + '"] input[data-f="customerName"]');
+    if (r.name && inp) { inp.value = r.name; toast('อ่านได้: ' + r.name + ' ตรวจแล้วกดบันทึก'); }
+    else toast('อ่านชื่อไม่ได้ ลองถ่ายให้ใกล้และชัดขึ้น หรือพิมพ์เอง', 'warn', 6000);
+  } catch (e) {
+    toast('อ่านไม่สำเร็จ: ' + e.message, 'bad', 6000);
+  }
+};
+
 // สลับไปหน้าแพคของ ใช้การเข้าสู่ระบบเดิม
 $('goStation').addEventListener('click', function (e) {
   if (state.pendingCount > 0) { e.preventDefault(); toast('รอบันทึกรายการที่สแกนให้เสร็จก่อน', 'warn'); }
@@ -1030,5 +1098,6 @@ window.addEventListener('beforeunload', function (e) {
 </script>
 </body>
 </html>
+
 
 
