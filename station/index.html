@@ -136,6 +136,11 @@
       <div id="cars" class="plats"></div>
       <label>ส่งแก้ของ track เดิม (ไม่บังคับ)</label>
       <input id="inParent" placeholder="สแกนหรือพิมพ์เลข track เดิม" autocomplete="off">
+      <label>ชื่อลูกค้า (ไม่บังคับ) <span id="ocrState"></span></label>
+      <div class="row" style="margin-top:0">
+        <input id="inCustomer" autocomplete="off" style="flex:1;min-width:0">
+        <button id="btnOcr" tabindex="-1">📷 อ่านจากกล้อง</button>
+      </div>
       <div class="row"><button class="primary" id="btnPlatOk">ยืนยัน</button></div>
     </div>
 
@@ -492,7 +497,7 @@ function startRecording(code) {
   const mr = new MediaRecorder(cv.captureStream(FPS), { mimeType: mime, videoBitsPerSecond: BITRATE[state.setup.resolution] || BITRATE[720] });
   const rec = {
     clientId: uid(), code: code, start: new Date(), chunks: [], mr: mr, mime: mime,
-    platformId: null, suggestedId: null, parentTracking: '', existing: null, cancelled: false,
+    platformId: null, suggestedId: null, parentTracking: '', customerName: '', existing: null, cancelled: false,
   };
   mr.ondataavailable = function (e) { if (e.data && e.data.size) rec.chunks.push(e.data); };
   mr.start(1000);
@@ -535,7 +540,12 @@ $('btnCancel').onclick = function () {
 document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && state.rec) stopRecording('button'); });
 
 // ------------------------------------------------------------------ scan
-function focusScan() { setTimeout(function () { if (document.activeElement !== $('inParent')) $('scan').focus(); }, 0); }
+function focusScan() {
+  setTimeout(function () {
+    const a = document.activeElement;
+    if (a !== $('inParent') && a !== $('inCustomer')) $('scan').focus();
+  }, 0);
+}
 $('scan').addEventListener('blur', function () {
   setTimeout(function () {
     const a = document.activeElement;
@@ -567,6 +577,8 @@ async function handleScan(raw) {
   if (state.rec) await stopRecording('next_scan');
 
   const rec = startRecording(code);
+  // เก็บภาพจากกล้องตอนสแกน (ใบปะหน้ามักอยู่ในกล้องตอนนี้) ไว้อ่านชื่อลูกค้า
+  const shot = snapshotB64();
   const rule = matchRule(code);
   if (rule) {
     openPlatform(rec, rule.suggestPlatformId, rule.carrierId);
@@ -579,6 +591,7 @@ async function handleScan(raw) {
     if (state.rec !== rec) return;
     // packCount 0 = เคยมีแต่คลิปถูกลบหมด ให้ถือเป็นเลขใหม่: คงหน้าต่างที่เปิดตามกฎบาร์โค้ดไว้
     // (ไม่เปลี่ยนค่าที่เลือกอยู่ เพราะค่าเดิมอาจเป็นค่าที่ผิดจนต้องลบคลิป)
+    if (!(chk.existing && chk.existing.customerName)) readNameFromShot(rec, shot);
     if (chk.existing && chk.existing.packCount === 0) {
       if (!rule) {
         show('invalidBox', false);
@@ -622,6 +635,8 @@ function openPlatform(rec, suggestedId, suggestedCarrierId) {
   platSel = rec.suggestedId;
   carSel = rec.suggestedCarrierId;
   $('inParent').value = '';
+  $('inCustomer').value = rec.customerName || '';
+  if (!rec.ocrBusy) $('ocrState').textContent = '';
   renderPlats();
   show('platBox', true);
 }
@@ -650,9 +665,45 @@ function confirmPlatform() {
   rec.platformId = platSel || rec.suggestedId || 'OTHER';
   rec.carrierId = carSel || rec.suggestedCarrierId || '';
   rec.parentTracking = normCode($('inParent').value);
+  rec.customerName = $('inCustomer').value.trim();
+  rec.nameConfirmed = true;
   show('platBox', false);
   focusScan();
 }
+
+// ------------------------------------------------------------------ customer name from webcam (OCR)
+// ภาพจากกล้องจริง (ไม่มีข้อความซ้อน) ความละเอียดเต็มของกล้อง
+function snapshotB64() {
+  if (!state.stream || video.readyState < 2) return '';
+  const c = document.createElement('canvas');
+  c.width = video.videoWidth; c.height = video.videoHeight;
+  c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.85).split(',')[1] || '';
+}
+async function readNameFromShot(rec, b64) {
+  if (!b64) return;
+  rec.ocrBusy = true;
+  if (state.rec === rec) $('ocrState').textContent = '· กำลังอ่านชื่อจากกล้อง...';
+  let name = '';
+  try { name = (await api('ocrLabel', { data: b64 })).name; } catch (e) { name = ''; }
+  rec.ocrBusy = false;
+  if (state.rec !== rec) {
+    // หยุดอัดไปแล้ว ถ้ายังไม่ได้อัปโหลดให้ใส่ชื่อในคิว (ใช้เฉพาะเมื่อยังไม่มีชื่อ)
+    if (name && !rec.customerName) rec.customerName = name;
+    return;
+  }
+  const popupOpen = !$('platBox').classList.contains('hidden');
+  if (popupOpen && !$('inCustomer').value.trim()) $('inCustomer').value = name;
+  if (!popupOpen && !rec.customerName) rec.customerName = name;
+  $('ocrState').textContent = name ? '· อ่านจากกล้อง ตรวจก่อนยืนยัน' : '· อ่านชื่อไม่ได้ พิมพ์เองได้';
+}
+$('btnOcr').addEventListener('mousedown', function (e) { e.preventDefault(); });
+$('btnOcr').onclick = function () {
+  if (!state.rec) return;
+  $('inCustomer').value = '';
+  readNameFromShot(state.rec, snapshotB64());
+};
+$('inCustomer').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); confirmPlatform(); } });
 function finalizePlatform(rec) {
   if (rec.existing) return;
   if (!$('platBox').classList.contains('hidden')) confirmPlatform();
@@ -669,6 +720,7 @@ async function enqueue(rec, reason) {
   const s = state.setup;
   const meta = {
     clientId: rec.clientId, code: rec.code, platformId: rec.platformId, carrierId: rec.carrierId || '', parentTracking: rec.parentTracking,
+    customerName: rec.customerName || '',
     companyId: s.companyId, branchId: s.branchId, stationId: s.stationId, resolution: s.resolution,
     startTime: rec.start.toISOString(), endTime: rec.end.toISOString(),
     durationSec: Math.round((rec.end - rec.start) / 1000), stopReason: reason,
