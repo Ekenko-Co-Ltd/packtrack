@@ -15,6 +15,9 @@
   .mode .on { background:#fff; color:var(--accent); }
   .clip { display:flex; gap:8px; align-items:center; border-top:1px solid var(--line); padding:8px 0; font-size:14px; }
   .clip .t { flex:1; min-width:0; }
+  #cropWrap { position:relative; touch-action:none; user-select:none; margin-top:8px; }
+  #cropImg { width:100%; display:block; border-radius:8px; }
+  #cropBox { position:absolute; border:3px solid #22c55e; background:rgba(34,197,94,.15); display:none; pointer-events:none; }
   header b { font-size:17px; }
   header .sp { flex:1; }
   header button { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.5); padding:6px 10px; }
@@ -221,6 +224,19 @@
     <div class="row">
       <button id="btnCostCancel">ยกเลิก</button>
       <button class="primary" id="btnCostSave">บันทึก</button>
+    </div>
+  </div>
+</div>
+
+<!-- ครอปภาพใบปะหน้าก่อนอ่านชื่อ -->
+<div class="modal hidden" id="cropModal">
+  <div class="sheet">
+    <b>ลากกรอบให้คลุมชื่อผู้รับ</b>
+    <div class="muted">ครอบเฉพาะชื่อ จะแม่นกว่าอ่านทั้งใบ ถ้าไม่ลากกรอบจะอ่านทั้งภาพ</div>
+    <div id="cropWrap"><img id="cropImg" alt=""><div id="cropBox"></div></div>
+    <div class="row">
+      <button id="btnCropCancel">ยกเลิก</button>
+      <button class="primary" id="btnCropOk">อ่านทั้งภาพ</button>
     </div>
   </div>
 </div>
@@ -1063,15 +1079,79 @@ async function autoNameFromShot(item, b64) {
   }
 }
 
-// ปุ่ม "อ่านชื่อ" ในรายละเอียดออเดอร์: ถ่ายใบปะหน้าแล้วเติมในช่อง ยังไม่บันทึกจนกว่าจะกด "บันทึก"
+// ------------------------------------------------------------------ crop before OCR (ต้องตรงกับหน้า station)
+let cropResolve = null, cropSel = null, cropStart = null;
+function openCrop(src) {
+  return new Promise(function (resolve) {
+    cropResolve = resolve;
+    cropSel = null;
+    drawCrop();
+    $('cropImg').src = src;
+    show('cropModal', true);
+  });
+}
+function cropPoint(e) {
+  const r = $('cropImg').getBoundingClientRect();
+  return { x: Math.min(Math.max(e.clientX - r.left, 0), r.width), y: Math.min(Math.max(e.clientY - r.top, 0), r.height) };
+}
+function drawCrop() {
+  const b = $('cropBox');
+  $('btnCropOk').textContent = cropSel ? 'อ่านในกรอบ' : 'อ่านทั้งภาพ';
+  if (!cropSel) { b.style.display = 'none'; return; }
+  b.style.display = 'block';
+  b.style.left = cropSel.x + 'px'; b.style.top = cropSel.y + 'px';
+  b.style.width = cropSel.w + 'px'; b.style.height = cropSel.h + 'px';
+}
+$('cropWrap').addEventListener('pointerdown', function (e) {
+  e.preventDefault();
+  this.setPointerCapture(e.pointerId);
+  cropStart = cropPoint(e);
+  cropSel = { x: cropStart.x, y: cropStart.y, w: 0, h: 0 };
+  drawCrop();
+});
+$('cropWrap').addEventListener('pointermove', function (e) {
+  if (!cropStart) return;
+  const p = cropPoint(e);
+  cropSel = { x: Math.min(p.x, cropStart.x), y: Math.min(p.y, cropStart.y), w: Math.abs(p.x - cropStart.x), h: Math.abs(p.y - cropStart.y) };
+  drawCrop();
+});
+$('cropWrap').addEventListener('pointerup', function () {
+  cropStart = null;
+  if (cropSel && (cropSel.w < 12 || cropSel.h < 12)) cropSel = null; // แตะเฉย ๆ = ล้างกรอบ
+  drawCrop();
+});
+function closeCrop(result) {
+  show('cropModal', false);
+  const r = cropResolve;
+  cropResolve = null;
+  if (r) r(result);
+}
+$('btnCropCancel').onclick = function () { closeCrop(null); };
+$('btnCropOk').onclick = function () {
+  const img = $('cropImg');
+  const k = img.naturalWidth / img.clientWidth;
+  let sx = 0, sy = 0, sw = img.naturalWidth, sh = img.naturalHeight;
+  if (cropSel) { sx = cropSel.x * k; sy = cropSel.y * k; sw = cropSel.w * k; sh = cropSel.h * k; }
+  // กรอบเล็กขยายให้ตัวอักษรใหญ่ขึ้น ภาพใหญ่ย่อให้ไม่เกิน 2000px
+  const scale = Math.min(2000 / Math.max(sw, sh), sw < 1000 ? 2 : 1);
+  const c = document.createElement('canvas');
+  c.width = Math.round(sw * scale); c.height = Math.round(sh * scale);
+  c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  closeCrop({ b64: c.toDataURL('image/jpeg', 0.9).split(',')[1] || '', cropped: !!cropSel });
+};
+
+// ปุ่ม "อ่านชื่อ" ในรายละเอียดออเดอร์: ถ่ายใบปะหน้า ครอป แล้วเติมในช่อง ยังไม่บันทึกจนกว่าจะกด "บันทึก"
 $('ocrPick').onchange = async function () {
   const file = this.files && this.files[0];
   const id = ocrTarget;
   if (!file || !id) return;
+  const url = URL.createObjectURL(file);
+  const crop = await openCrop(url);
+  URL.revokeObjectURL(url);
+  if (!crop) return;
   toast('กำลังอ่านชื่อจากภาพ...', '', 20000);
   try {
-    const data = await blobToB64(await shrink(file));
-    const r = await api('ocrLabel', { data: data });
+    const r = await api('ocrLabel', { data: crop.b64, cropped: crop.cropped });
     const inp = document.querySelector('[data-item="' + id + '"] input[data-f="customerName"]');
     if (r.name && inp) { inp.value = r.name; toast('อ่านได้: ' + r.name + ' ตรวจแล้วกดบันทึก'); }
     else toast('อ่านชื่อไม่ได้ ลองถ่ายให้ใกล้และชัดขึ้น หรือพิมพ์เอง', 'warn', 6000);
@@ -1098,6 +1178,7 @@ window.addEventListener('beforeunload', function (e) {
 </script>
 </body>
 </html>
+
 
 
 
