@@ -1,1634 +1,257 @@
-/**
- * PackTrack — Apps Script backend
- *
- * doPost  = JSON API สำหรับหน้าสถานีแพค (station.html)
- * doGet   = หน้าสถานะสาธารณะ  .../exec?t={public_token}
- *
- * Deploy: Web app, Execute as = Me (theeradon.t@ekenko.co.th), Who has access = Anyone
- * การยืนยันตัวตนพนักงานทำด้วยรหัส OTP ทางอีเมล เทียบกับแท็บ Users
- */
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PackTrack สถานีแพค</title>
+<style>
+  :root { --bg:#f3f4f6; --card:#fff; --text:#111827; --muted:#6b7280; --line:#e5e7eb; --accent:#1f3864; --ok:#16a34a; --warn:#d97706; --bad:#dc2626; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 "Sarabun","Noto Sans Thai",Arial,sans-serif; }
+  header { background:var(--accent); color:#fff; padding:10px 16px; display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header b { font-size:17px; }
+  header .sp { flex:1; }
+  header button { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.5); }
+  .mode { display:inline-flex; border:1px solid rgba(255,255,255,.5); border-radius:8px; overflow:hidden; }
+  .mode span, .mode a { padding:7px 14px; color:#fff; text-decoration:none; font-weight:600; }
+  .mode .on { background:#fff; color:var(--accent); }
+  button { font:inherit; border-radius:8px; border:1px solid var(--line); background:#fff; padding:8px 14px; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.danger { background:var(--bad); color:#fff; border-color:var(--bad); }
+  button:disabled { opacity:.5; cursor:default; }
+  input, select { font:inherit; padding:8px 10px; border:1px solid #cbd5e1; border-radius:8px; width:100%; background:#fff; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  .hidden { display:none !important; }
+  .center { max-width:420px; margin:40px auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .row { display:flex; gap:8px; margin-top:12px; }
+  .main { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:14px; padding:14px; }
+  @media (max-width: 900px) { .main { grid-template-columns:1fr; } }
+  .stage { position:relative; background:#000; border-radius:10px; overflow:hidden; aspect-ratio:16/9; }
+  .stage video { width:100%; height:100%; object-fit:contain; display:block; }
+  .rec { position:absolute; top:12px; right:12px; background:var(--bad); color:#fff; font-weight:700; padding:4px 12px; border-radius:999px; }
+  .rec::before { content:"● "; }
+  .stage .code { position:absolute; left:12px; bottom:12px; background:rgba(0,0,0,.6); color:#fff; padding:6px 12px; border-radius:8px; font-size:22px; font-weight:700; }
+  .side { display:flex; flex-direction:column; gap:12px; }
+  #scan { font-size:22px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; }
+  .banner { border-radius:8px; padding:10px 12px; font-size:14px; }
+  .banner.warn { background:#fef3c7; border:1px solid #f59e0b; }
+  .banner.bad { background:#fee2e2; border:1px solid #ef4444; }
+  .plats { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:8px; }
+  .plats button.sel { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .list { max-height:360px; overflow:auto; }
+  .item { border-bottom:1px solid var(--line); padding:8px 0; display:flex; gap:8px; align-items:center; }
+  .item .t { flex:1; min-width:0; }
+  .item .t b { word-break:break-all; }
+  .pill { font-size:12px; border-radius:999px; padding:1px 8px; white-space:nowrap; }
+  .pill.wait { background:#e5e7eb; } .pill.up { background:#dbeafe; } .pill.done { background:#dcfce7; } .pill.err { background:#fee2e2; } .pill.del { background:#f3f4f6; color:var(--muted); text-decoration:line-through; }
+  .item button { padding:4px 8px; font-size:13px; }
+  .item button.del { color:var(--bad); border-color:#fca5a5; }
+  #toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#111827; color:#fff; padding:10px 18px; border-radius:8px; z-index:9; max-width:90vw; }
+  canvas#cv { position:absolute; left:-99999px; top:0; }
+  .err { color:var(--bad); font-size:14px; margin-top:8px; }
+</style>
+</head>
+<body>
 
-const CONFIG = {
-  DB_ID: '1m4ohc7WBj3ztHuvd4rGlztl2bLYLoKAmI9G6bQtzWFk',
-  LOG_ID: '1qWxleKGknE4bahAOY0j-euXHN8lMkE0FzXIbEDvhR6A',
-  ROOT_FOLDER_ID: '1-LakYmUNGRZ2RUl7C9n36NkwBrLh3O-S',
-  MEDIA_FOLDER_NAME: 'Media',
-  TZ: 'Asia/Bangkok',
-  SESSION_HOURS: 12,
-  OTP_MINUTES: 10,
-  OTP_MAX_TRIES: 5,
-  STATUS_PACKED: 'ST-PACKED',
-  STATUS_SHIPPED: 'ST-SHIPPED',
-  STATUS_DELETING: 'ST-DELETING',
-  PACK_ROLES: ['Admin', 'Editor'],
+<header id="hdr" class="hidden">
+  <nav class="mode"><span class="on">แพคของ</span><a id="goDispatch" href="../dispatch/">จัดส่ง</a></nav>
+  <span id="hdrCtx" class="muted" style="color:#dbeafe"></span>
+  <span class="sp"></span>
+  <span id="hdrQueue"></span>
+  <span id="hdrUser"></span>
+  <button id="btnSetup">ตั้งค่า</button>
+  <button id="btnLogout">ออกจากระบบ</button>
+</header>
+
+<!-- เข้าสู่ระบบ -->
+<section id="vLogin" class="center hidden">
+  <div class="card">
+    <h2 style="margin-top:0">เข้าสู่ระบบ</h2>
+    <div id="apiBox">
+      <label>URL ของ Apps Script (Web app /exec)</label>
+      <input id="inApi" placeholder="https://script.google.com/macros/s/.../exec">
+    </div>
+    <label>อีเมล</label>
+    <input id="inEmail" type="email" autocomplete="email">
+    <div class="row"><button class="primary" id="btnOtp">ส่งรหัสทางอีเมล</button></div>
+    <div id="otpBox" class="hidden">
+      <label>รหัส 6 หลักจากอีเมล</label>
+      <input id="inOtp" inputmode="numeric" maxlength="6">
+      <div class="row"><button class="primary" id="btnVerify">เข้าสู่ระบบ</button></div>
+    </div>
+    <div id="loginErr" class="err"></div>
+  </div>
+</section>
+
+<!-- ตั้งค่าสถานี -->
+<section id="vSetup" class="center hidden">
+  <div class="card">
+    <h2 style="margin-top:0">ตั้งค่าสถานี</h2>
+    <label>บริษัท</label><select id="selCompany"></select>
+    <label>สาขา</label><select id="selBranch"></select>
+    <label>สถานี</label><select id="selStation"></select>
+    <label>ความละเอียดวิดีโอ</label>
+    <select id="selRes"><option value="720">720p (แนะนำ ไฟล์เล็ก)</option><option value="1080">1080p (ชัดกว่า ไฟล์ใหญ่ขึ้นประมาณ 2 เท่า)</option></select>
+    <label>กล้อง</label><select id="selCam"></select>
+    <div class="row"><button class="primary" id="btnStart">เริ่มใช้งาน</button></div>
+    <div id="setupErr" class="err"></div>
+  </div>
+</section>
+
+<!-- หน้าสถานี -->
+<section id="vStation" class="main hidden">
+  <div>
+    <div class="stage">
+      <video id="video" muted playsinline autoplay></video>
+      <div id="recBadge" class="rec hidden">REC 00:00</div>
+      <div id="recCode" class="code hidden"></div>
+    </div>
+    <p class="muted">สแกนบาร์โค้ดเพื่อเริ่มอัด · สแกนกล่องถัดไป กดปุ่มหยุด กด Esc หรือสแกนบาร์โค้ด STOP เพื่อหยุด · ตัดอัตโนมัติเมื่อเกิน 10 นาที</p>
+  </div>
+  <div class="side">
+    <div class="card">
+      <label style="margin-top:0">สแกนบาร์โค้ด</label>
+      <input id="scan" autocomplete="off" spellcheck="false">
+      <div class="row">
+        <button class="danger" id="btnStop" disabled>หยุดอัด</button>
+        <button id="btnCancel" disabled>ยกเลิกการอัดนี้</button>
+      </div>
+    </div>
+
+    <div id="invalidBox" class="banner bad hidden">
+      <b>บาร์โค้ดไม่ตรงรูปแบบเลข track ที่รู้จัก</b>
+      <div class="muted">อาจสแกนผิดอัน เช่น รหัสคัดแยกของขนส่ง</div>
+      <div class="row"><button id="btnKeep">ใช้เลขนี้ต่อ</button><button class="danger" id="btnDiscard">ยกเลิก</button></div>
+    </div>
+
+    <div id="repeatBox" class="banner warn hidden"></div>
+
+    <div id="platBox" class="card hidden">
+      <b>ตรวจสอบแพลตฟอร์มและการจัดส่ง</b> <span class="muted">(เลขใหม่ · กด Enter เพื่อยืนยัน)</span>
+      <label>แพลตฟอร์ม</label>
+      <div id="plats" class="plats"></div>
+      <label>การจัดส่ง</label>
+      <div id="cars" class="plats"></div>
+      <label>ส่งแก้ของ track เดิม (ไม่บังคับ)</label>
+      <input id="inParent" placeholder="สแกนหรือพิมพ์เลข track เดิม" autocomplete="off">
+      <label>ชื่อลูกค้า (ไม่บังคับ) <span id="ocrState"></span></label>
+      <div class="row" style="margin-top:0">
+        <input id="inCustomer" autocomplete="off" style="flex:1;min-width:0">
+        <button id="btnOcr" tabindex="-1">📷 อ่านจากกล้อง</button>
+      </div>
+      <div class="row"><button class="primary" id="btnPlatOk">ยืนยัน</button></div>
+    </div>
+
+    <div class="card">
+      <b>รายการล่าสุด</b> <span class="muted" id="queueInfo"></span>
+      <div id="recent" class="list"></div>
+    </div>
+
+    <div class="card">
+      <b>ค้นหาคลิปเพื่อดูหรือลบ</b>
+      <div class="row">
+        <input id="clipCode" placeholder="เลข track" autocomplete="off" spellcheck="false" style="flex:1;min-width:0">
+        <button id="btnClipFind">ค้นหา</button>
+      </div>
+      <div id="clipList" class="list"></div>
+    </div>
+  </div>
+</section>
+
+<canvas id="cv"></canvas>
+<div id="toast" class="hidden"></div>
+
+<script>
+'use strict';
+
+// ------------------------------------------------------------------ config
+const DEFAULT_API_URL = 'https://script.google.com/a/macros/ekenko.co.th/s/AKfycbw-ZkJTo5LYeyNmwSFk-OHe7g8twc4J6_6QUxscY_eS2wsnVo_gN-hxUYstDcSri-V8Ww/exec';
+const BITRATE = { 720: 1500000, 1080: 3000000 };
+const SIZE = { 720: [1280, 720], 1080: [1920, 1080] };
+const MAX_MS = 10 * 60 * 1000;
+const CHUNK = 256 * 1024 * 20; // 5 MB (ต้องเป็นทวีคูณของ 256 KB)
+const FPS = 25;
+const STOP_CODES = ['STOP', '#STOP'];
+
+// ------------------------------------------------------------------ storage
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('pt_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('pt_' + k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem('pt_' + k); } catch (e) {} },
 };
 
-// คอลัมน์ที่ต้องเก็บเป็นข้อความเสมอ (กันเลขยาวถูกแปลงเป็นตัวเลข)
-// customer_name ใส่ไว้ด้วย กันชื่อที่ขึ้นต้นด้วย = หรือ + ถูกตีความเป็นสูตร
-const TEXT_KEYS = ['tracking_no', 'order_no', 'bill_no', 'courier_tracking_no', 'pattern', 'sample', 'customer_name'];
-
-const ACTIONS = {
-  requestOtp: { auth: false, fn: requestOtp_ },
-  verifyOtp: { auth: false, fn: verifyOtp_ },
-  bootstrap: { fn: bootstrap_ },
-  checkTracking: { fn: checkTracking_ },
-  beginPack: { fn: beginPack_ },
-  uploadChunk: { fn: uploadChunk_ },
-  deleteVideo: { fn: deleteVideo_ },
-  listClips: { fn: listClips_ },
-  ocrLabel: { fn: ocrLabel_ },
-  listBatches: { fn: listBatches_ },
-  saveBatch: { fn: saveBatch_ },
-  getBatch: { fn: getBatch_ },
-  scanToBatch: { fn: scanToBatch_ },
-  updateItem: { fn: updateItem_ },
-  removeItem: { fn: removeItem_ },
-  uploadPhoto: { fn: uploadPhoto_ },
-  setPhotoPublic: { fn: setPhotoPublic_ },
-  deletePhoto: { fn: deletePhoto_ },
-  setItemCosts: { fn: setItemCosts_ },
-  closeBatch: { fn: closeBatch_ },
-  cancelBatch: { fn: cancelBatch_ },
-  publicData: { auth: false, fn: function (p) { return publicData_(String(p.t || '')); } },
-  logout: { fn: logout_ },
-};
-
-// ---------------------------------------------------------------- entry points
-
-function doPost(e) {
-  let out;
-  try {
-    const p = JSON.parse(e.postData.contents);
-    const a = ACTIONS[p.action];
-    if (!a) throw new Error('unknown action: ' + p.action);
-    const user = a.auth === false ? null : auth_(p.token);
-    out = { ok: true, data: a.fn(p, user) };
-  } catch (err) {
-    console.error(err && err.stack ? err.stack : err);
-    out = { ok: false, error: String((err && err.message) || err), code: (err && err.code) || '' };
-  }
-  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
-}
-
-function doGet(e) {
-  const t = e && e.parameter && e.parameter.t ? String(e.parameter.t) : '';
-  let data = null;
-  try {
-    if (t) data = publicData_(t);
-  } catch (err) {
-    console.error(err);
-  }
-  const tpl = HtmlService.createTemplateFromFile('Public');
-  tpl.json = JSON.stringify(data).replace(/</g, '\\u003c');
-  return tpl
-    .evaluate()
-    .setTitle('สถานะพัสดุ')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
-}
-
-/** รันครั้งแรกใน editor เพื่อกดอนุญาตสิทธิ์ทั้งหมด และตรวจว่าเข้าถึงไฟล์ได้ */
-function authorize() {
-  Logger.log('DB: ' + db_().getName());
-  Logger.log('Log: ' + SpreadsheetApp.openById(CONFIG.LOG_ID).getName());
-  Logger.log('Root folder: ' + DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID).getName());
-  const res = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
-    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
-  });
-  Logger.log('Drive API: ' + res.getContentText());
-  Logger.log('Mail quota left today: ' + MailApp.getRemainingDailyQuota());
-}
-
-/** รันครั้งเดียวใน editor: ตั้งให้ scheduledJobs ทำงานทุก 10 นาที */
-function installTriggers() {
-  ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === 'scheduledJobs') ScriptApp.deleteTrigger(t);
-  });
-  ScriptApp.newTrigger('scheduledJobs').timeBased().everyMinutes(10).create();
-  Logger.log('installed: scheduledJobs every 10 minutes');
-}
-
-// ---------------------------------------------------------------- auth
-
-/**
- * ตอบเหมือนกันทุกกรณี (มีสิทธิ์ / ไม่มีสิทธิ์ / ขอถี่เกิน) เพื่อไม่ให้คนนอกเดาได้ว่าอีเมลไหนเป็นผู้ใช้
- * ส่งรหัสจริงเฉพาะอีเมลที่อยู่ในแท็บ Users และไม่เกิน 1 ครั้งต่อนาที
- */
-function requestOtp_(p) {
-  const email = normEmail_(p.email);
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('รูปแบบอีเมลไม่ถูกต้อง');
-  const cache = CacheService.getScriptCache();
-  if (cache.get('otpwait:' + email)) return { sent: true };
-  cache.put('otpwait:' + email, '1', 60);
-  const user = getUser_(email);
-  if (!user) return { sent: true };
-  const code = String(Math.floor(100000 + Math.random() * 900000));
-  cache.put('otp:' + email, JSON.stringify({ code: code, tries: 0 }), CONFIG.OTP_MINUTES * 60);
-  MailApp.sendEmail({
-    to: email,
-    subject: 'รหัสเข้าใช้ PackTrack: ' + code,
-    body:
-      'รหัสเข้าใช้ระบบ PackTrack ของคุณคือ ' + code + '\n' +
-      'รหัสนี้ใช้ได้ ' + CONFIG.OTP_MINUTES + ' นาที\n\n' +
-      'ถ้าคุณไม่ได้ขอรหัสนี้ ไม่ต้องทำอะไร',
-  });
-  audit_(email, 'otp_request', 'Users', email);
-  return { sent: true };
-}
-
-function verifyOtp_(p) {
-  const email = normEmail_(p.email);
-  const cache = CacheService.getScriptCache();
-  // ข้อความผิดพลาดเหมือนกันทุกกรณี
-  const bad = 'รหัสไม่ถูกต้องหรือหมดอายุ กรุณาขอรหัสใหม่';
-  const raw = cache.get('otp:' + email);
-  if (!raw) throw new Error(bad);
-  const otp = JSON.parse(raw);
-  if (otp.tries >= CONFIG.OTP_MAX_TRIES) throw new Error(bad);
-  if (String(p.code || '').trim() !== otp.code) {
-    otp.tries++;
-    cache.put('otp:' + email, JSON.stringify(otp), CONFIG.OTP_MINUTES * 60);
-    throw new Error(bad);
-  }
-  cache.remove('otp:' + email);
-  const user = getUser_(email);
-  if (!user) throw new Error(bad);
-
-  const props = PropertiesService.getScriptProperties();
-  const now = Date.now();
-  // ล้าง session ที่หมดอายุ
-  const all = props.getProperties();
-  Object.keys(all).forEach(function (k) {
-    if (k.indexOf('s_') !== 0) return;
-    try {
-      if (JSON.parse(all[k]).exp < now) props.deleteProperty(k);
-    } catch (e) {
-      props.deleteProperty(k);
-    }
-  });
-  const token = 'T' + Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
-  props.setProperty('s_' + token, JSON.stringify({ email: email, exp: now + CONFIG.SESSION_HOURS * 3600 * 1000 }));
-  audit_(email, 'login', 'Users', email);
-  return { token: token, user: { email: email, name: user.display_name, role: user.role } };
-}
-
-function logout_(p, user) {
-  PropertiesService.getScriptProperties().deleteProperty('s_' + p.token);
-  audit_(user.email, 'logout', 'Users', user.email);
-  return { ok: true };
-}
-
-function auth_(token) {
-  const fail = function (msg) {
-    const e = new Error(msg);
-    e.code = 'AUTH';
-    return e;
-  };
-  if (!token) throw fail('กรุณาเข้าสู่ระบบ');
-  const raw = PropertiesService.getScriptProperties().getProperty('s_' + token);
-  if (!raw) throw fail('session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
-  const s = JSON.parse(raw);
-  if (s.exp < Date.now()) throw fail('session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
-  const u = getUser_(s.email);
-  if (!u) throw fail('อีเมลนี้ถูกปิดใช้งาน');
-  return {
-    email: s.email,
-    name: u.display_name || s.email,
-    role: String(u.role),
-    access: readAll_('UserAccess').filter(function (a) {
-      return normEmail_(a.email) === s.email;
-    }),
-  };
-}
-
-function getUser_(email) {
-  return (
-    readAll_('Users').filter(function (u) {
-      return normEmail_(u.email) === email && isTrue_(u.active);
-    })[0] || null
-  );
-}
-
-function canAccess_(user, companyId, branchId) {
-  if (user.role === 'Admin') return true;
-  return user.access.some(function (a) {
-    return a.company_id === companyId && (!a.branch_id || a.branch_id === branchId);
-  });
-}
-
-function requireRole_(user, roles) {
-  if (roles.indexOf(user.role) < 0) throw new Error('สิทธิ์ ' + user.role + ' ทำรายการนี้ไม่ได้');
-}
-
-// ---------------------------------------------------------------- station API
-
-function bootstrap_(p, user) {
-  const companies = readAll_('Companies').filter(function (c) {
-    return isTrue_(c.active) && (user.role === 'Admin' || user.access.some(function (a) { return a.company_id === c.company_id; }));
-  });
-  const branches = readAll_('Branches').filter(function (b) {
-    return isTrue_(b.active) && canAccess_(user, b.company_id, b.branch_id);
-  });
-  return {
-    user: { email: user.email, name: user.name, role: user.role },
-    companies: companies.map(function (c) { return { id: c.company_id, name: c.company_name }; }),
-    branches: branches.map(function (b) { return { id: b.branch_id, companyId: b.company_id, name: b.branch_name }; }),
-    stations: readAll_('Stations')
-      .filter(function (s) { return isTrue_(s.active); })
-      .map(function (s) {
-        return { id: s.station_id, name: s.station_name, companyId: s.company_id, branchId: s.branch_id, resolution: String(s.default_resolution || '') };
-      }),
-    platforms: readAll_('Platforms')
-      .filter(function (x) { return isTrue_(x.active); })
-      .map(function (x) { return { id: x.platform_id, name: x.platform_name }; }),
-    carriers: readAll_('Carriers')
-      .filter(function (x) { return isTrue_(x.active); })
-      .map(function (x) { return { id: x.carrier_id, name: x.carrier_name }; }),
-    statuses: readAll_('Statuses')
-      .filter(function (x) { return isTrue_(x.active); })
-      .sort(function (a, b) { return Number(a.sort_order || 0) - Number(b.sort_order || 0); })
-      .map(function (x) { return { id: x.status_id, name: x.status_name, color: x.color }; }),
-    rules: activeRules_().map(function (r) {
-      return { pattern: String(r.pattern), carrierId: r.carrier_id, suggestPlatformId: r.suggest_platform_id };
-    }),
-  };
-}
-
-function checkTracking_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const code = normCode_(p.code);
-  const rule = matchRule_(code);
-  const found = findRow_('Shipments', 'tracking_no', code);
-  let existing = null;
-  if (found) {
-    const s = found.obj;
-    existing = {
-      shipmentId: s.shipment_id,
-      companyId: s.company_id,
-      branchId: s.branch_id,
-      platformId: s.platform_id,
-      carrierId: s.carrier_id,
-      customerName: s.customer_name || '',
-      statusId: s.status_id,
-      statusName: lookup_('Statuses', 'status_id', 'status_name')[s.status_id] || s.status_id,
-      packCount: Number(s.pack_count || 0),
-      publicUrl: s.public_url,
-    };
-  }
-  return { code: code, valid: !!rule, carrierId: rule ? rule.carrier_id : '', suggestPlatformId: rule ? rule.suggest_platform_id : '', existing: existing };
-}
-
-/**
- * สร้าง/อัปเดต Shipment + PackSession แล้วเปิด resumable upload session ของ Drive
- * เรียกซ้ำด้วย clientId เดิมได้ (กรณีเน็ตหลุดกลางทาง) จะไม่สร้างแถวซ้ำ
- */
-function beginPack_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const m = p.meta || {};
-  const code = normCode_(m.code);
-  if (!code) throw new Error('ไม่มีเลข track');
-  if (!(Number(m.size) > 0)) throw new Error('ไฟล์วิดีโอว่าง');
-  if (!canAccess_(user, m.companyId, m.branchId)) throw new Error('ไม่มีสิทธิ์บริษัท/สาขานี้');
-  const size = Number(m.size);
-  const mime = String(m.mimeType || 'video/webm');
-  const sessionId = 'PS-' + String(m.clientId || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 40);
-  if (sessionId === 'PS-') throw new Error('ไม่มี clientId');
-  const cache = CacheService.getScriptCache();
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  try {
-    // --- เรียกซ้ำ: มีแถว PackSession อยู่แล้ว
-    const ps = findRow_('PackSessions', 'session_id', sessionId);
-    if (ps) {
-      const ship = findRow_('Shipments', 'shipment_id', ps.obj.shipment_id);
-      if (ps.obj.upload_status === 'done') {
-        return { done: true, sessionId: sessionId, videoUrl: ps.obj.video_url, publicUrl: ship ? ship.obj.public_url : '' };
-      }
-      let url = cache.get('up:' + sessionId);
-      if (url) {
-        const st = uploadStatus_(url, size);
-        if (st.fileId) return finishUpload_(sessionId, st.fileId, user);
-        if (st.offset !== null) return { sessionId: sessionId, offset: st.offset };
-      }
-      url = createUploadSession_(ship.obj.drive_folder_id, fileName_(code, m), mime, size);
-      cache.put('up:' + sessionId, url, 21600);
-      return { sessionId: sessionId, offset: 0 };
-    }
-
-    const now = new Date();
-    const start = m.startTime ? new Date(m.startTime) : now;
-    const end = m.endTime ? new Date(m.endTime) : now;
-    const P = CONFIG.STATUS_PACKED;
-    let ship = findRow_('Shipments', 'tracking_no', code);
-    // pack_count = 0 คือเคยสร้างไว้แต่คลิปถูกลบหมดแล้ว ถือเป็นการแพคใหม่ (ไม่นับว่าซ้ำ)
-    const isRepeat = !!ship && Number(ship.obj.pack_count || 0) > 0;
-
-    if (ship) {
-      const changes = { pack_count: Number(ship.obj.pack_count || 0) + 1, last_packed_at: start, updated_by: user.email, updated_at: now };
-      if (!isRepeat && m.platformId && lookup_('Platforms', 'platform_id', 'platform_id')[m.platformId]) {
-        changes.platform_id = m.platformId;
-      }
-      if (!isRepeat && m.carrierId && lookup_('Carriers', 'carrier_id', 'carrier_id')[m.carrierId]) {
-        changes.carrier_id = m.carrierId;
-      }
-      const name = cleanName_(m.customerName);
-      if (name && !ship.obj.customer_name) changes.customer_name = name;
-      if (ship.obj.status_id !== P) {
-        addHistory_(ship.obj.shipment_id, ship.obj.status_id, P, '', user.email, now, 'แพคใหม่');
-        changes.status_id = P;
-      }
-      if (!liveFolder_(ship.obj.drive_folder_id)) {
-        changes.drive_folder_id = trackingFolder_(ship.obj.company_id, ship.obj.branch_id, start, code).getId();
-      }
-      update_(ship, changes);
-      audit_(user.email, 'repack', 'Shipments', ship.obj.shipment_id, 'pack_count', ship.obj.pack_count, changes.pack_count, m.stationId);
-    } else {
-      const id = newId_('SH');
-      const token = 'P' + Utilities.getUuid().replace(/-/g, '');
-      const rule = matchRule_(code);
-      const platformIds = readAll_('Platforms').map(function (x) { return x.platform_id; });
-      const carrierIds = readAll_('Carriers').map(function (x) { return x.carrier_id; });
-      let parent = null;
-      let note = '';
-      if (m.parentTracking) {
-        const pc = normCode_(m.parentTracking);
-        parent = findRow_('Shipments', 'tracking_no', pc);
-        if (!parent) note = 'อ้างอิง track เดิม ' + pc + ' (ไม่พบในระบบ)';
-      }
-      const obj = {
-        shipment_id: id,
-        public_token: token,
-        public_url: publicUrl_(token),
-        company_id: m.companyId,
-        branch_id: m.branchId,
-        tracking_no: code,
-        // ใช้ขนส่งที่พนักงานยืนยัน ถ้าไม่มีใช้ตามกฎบาร์โค้ด
-        carrier_id: carrierIds.indexOf(m.carrierId) >= 0 ? m.carrierId : rule ? rule.carrier_id : '',
-        platform_id: platformIds.indexOf(m.platformId) >= 0 ? m.platformId : 'OTHER',
-        order_no: parent ? parent.obj.order_no : '',
-        customer_name: cleanName_(m.customerName) || (parent ? parent.obj.customer_name : ''),
-        status_id: P,
-        pack_count: 1,
-        first_packed_at: start,
-        last_packed_at: start,
-        parent_shipment_id: parent ? parent.obj.shipment_id : '',
-        root_shipment_id: parent ? parent.obj.root_shipment_id || parent.obj.shipment_id : id,
-        attempt_no: parent ? Number(parent.obj.attempt_no || 1) + 1 : 1,
-        drive_folder_id: trackingFolder_(m.companyId, m.branchId, start, code).getId(),
-        note: note,
-        created_by: user.email,
-        created_at: now,
-        updated_by: user.email,
-        updated_at: now,
-      };
-      append_('Shipments', obj);
-      addHistory_(id, '', P, '', user.email, now, '');
-      audit_(user.email, 'create', 'Shipments', id, 'tracking_no', '', code, m.stationId);
-      ship = findRow_('Shipments', 'shipment_id', id);
-    }
-
-    append_('PackSessions', {
-      session_id: sessionId,
-      shipment_id: ship.obj.shipment_id,
-      tracking_no: code,
-      station_id: m.stationId || '',
-      packer_email: user.email,
-      start_time: start,
-      end_time: end,
-      duration_sec: Math.max(0, Math.round((end - start) / 1000)),
-      stop_reason: m.stopReason || '',
-      resolution: m.resolution || '',
-      upload_status: 'uploading',
-      is_repeat: isRepeat,
+// คิววิดีโอเก็บใน IndexedDB เพื่อไม่ให้หายถ้าปิดหน้าหรือเน็ตหลุด (ถ้าใช้ไม่ได้จะเก็บในหน่วยความจำ)
+const Q = (function () {
+  let dbp = null;
+  const mem = new Map();
+  function open() {
+    if (dbp) return dbp;
+    dbp = new Promise(function (resolve) {
+      try {
+        const r = indexedDB.open('packtrack', 1);
+        r.onupgradeneeded = function () { r.result.createObjectStore('queue', { keyPath: 'id' }); };
+        r.onsuccess = function () { resolve(r.result); };
+        r.onerror = function () { resolve(null); };
+      } catch (e) { resolve(null); }
     });
-    audit_(user.email, 'pack', 'PackSessions', sessionId, 'tracking_no', '', code, m.stationId);
-
-    const url = createUploadSession_(ship.obj.drive_folder_id, fileName_(code, m), mime, size);
-    cache.put('up:' + sessionId, url, 21600);
-    return { sessionId: sessionId, offset: 0, isRepeat: isRepeat, publicUrl: ship.obj.public_url };
-  } finally {
-    lock.releaseLock();
+    return dbp;
   }
-}
-
-/** ส่งไฟล์ทีละท่อน (base64) ต่อเข้า resumable session */
-function uploadChunk_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const url = CacheService.getScriptCache().get('up:' + p.sessionId);
-  if (!url) {
-    const e = new Error('upload session หมดอายุ');
-    e.code = 'UPLOAD_EXPIRED';
-    throw e;
-  }
-  const bytes = Utilities.base64Decode(p.data);
-  const offset = Number(p.offset);
-  const total = Number(p.total);
-  const last = offset + bytes.length - 1;
-  const res = UrlFetchApp.fetch(url, {
-    method: 'put',
-    contentType: 'application/octet-stream',
-    payload: bytes,
-    headers: { 'Content-Range': 'bytes ' + offset + '-' + last + '/' + total },
-    muteHttpExceptions: true,
-  });
-  const code = res.getResponseCode();
-  if (code === 308) return { done: false, next: rangeEnd_(res) };
-  if (code === 200 || code === 201) {
-    const f = JSON.parse(res.getContentText());
-    return finishUpload_(p.sessionId, f.id, user);
-  }
-  throw new Error('อัปโหลดล้มเหลว (' + code + '): ' + res.getContentText().slice(0, 300));
-}
-
-function finishUpload_(sessionId, fileId, user) {
-  const ps = findRow_('PackSessions', 'session_id', sessionId);
-  if (!ps) throw new Error('ไม่พบ PackSession ' + sessionId);
-  let warning = '';
-  const file = DriveApp.getFileById(fileId);
-  try {
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  } catch (e) {
-    warning = 'ตั้งค่าแชร์ลิงก์ไม่สำเร็จ: ' + e.message;
-    audit_(user.email, 'error', 'PackSessions', sessionId, 'sharing', '', warning);
-  }
-  const videoUrl = 'https://drive.google.com/file/d/' + fileId + '/view';
-  update_(ps, {
-    video_file_id: fileId,
-    video_url: videoUrl,
-    file_size_mb: Math.round((file.getSize() / 1048576) * 100) / 100,
-    upload_status: 'done',
-  });
-  CacheService.getScriptCache().remove('up:' + sessionId);
-  audit_(user.email, 'upload', 'PackSessions', sessionId, 'video_file_id', '', fileId, ps.obj.station_id);
-  const ship = findRow_('Shipments', 'shipment_id', ps.obj.shipment_id);
-  return { done: true, sessionId: sessionId, videoUrl: videoUrl, publicUrl: ship ? ship.obj.public_url : '', warning: warning };
-}
-
-// ---------------------------------------------------------------- dispatch (รอบส่ง)
-
-// ฟิลด์ของรอบส่งที่แก้จากหน้าส่งออกได้: ชื่อใน client -> คอลัมน์ใน DispatchBatches
-const BATCH_FIELDS = {
-  date: 'dispatch_date', carrierId: 'carrier_id', courierName: 'courier_name', courierPhone: 'courier_phone',
-  vehiclePlate: 'vehicle_plate', driverName: 'driver_name', driverPhone: 'driver_phone', billNo: 'bill_no',
-  statusId: 'set_status_id', tripCost: 'trip_cost', details: 'details',
-};
-
-/** รอบที่ยังเปิดอยู่ + รอบที่สร้างใน 3 วันล่าสุด ของบริษัท/สาขานั้น */
-function listBatches_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  if (!canAccess_(user, p.companyId, p.branchId)) throw new Error('ไม่มีสิทธิ์บริษัท/สาขานี้');
-  const since = Date.now() - 3 * 86400000;
-  const counts = {};
-  readAll_('DispatchItems').forEach(function (i) { counts[i.batch_id] = (counts[i.batch_id] || 0) + 1; });
-  return readAll_('DispatchBatches')
-    .filter(function (b) {
-      if (b.company_id !== p.companyId || b.branch_id !== p.branchId || b.batch_status === 'cancelled') return false;
-      return b.batch_status === 'open' || (b.created_at instanceof Date && b.created_at.getTime() > since);
-    })
-    .sort(function (a, b) { return (b.created_at || 0) - (a.created_at || 0); })
-    .slice(0, 30)
-    .map(function (b) { return batchOut_(b, counts[b.batch_id] || 0); });
-}
-
-/** สร้างรอบใหม่ (ไม่มี batchId) หรือแก้ข้อมูลรอบเดิม */
-function saveBatch_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const d = p.batch || {};
-  const statusIds = readAll_('Statuses').filter(function (s) { return isTrue_(s.active); }).map(function (s) { return s.status_id; });
-  if (statusIds.indexOf(d.statusId) < 0) throw new Error('กรุณาเลือกสถานะ');
-  const vals = {};
-  Object.keys(BATCH_FIELDS).forEach(function (k) {
-    if (d[k] === undefined) return;
-    let v = d[k] === null ? '' : d[k];
-    if (k === 'date') v = v ? Utilities.parseDate(String(v), CONFIG.TZ, 'yyyy-MM-dd') : new Date();
-    if (k === 'tripCost') v = v === '' ? '' : Number(v) || 0;
-    if (typeof v === 'string') v = v.trim();
-    vals[BATCH_FIELDS[k]] = v;
-  });
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  try {
-    if (p.batchId) {
-      const b = liveBatchRow_(p.batchId, user);
-      update_(b, vals);
-      audit_(user.email, 'update', 'DispatchBatches', b.obj.batch_id, 'fields', '', JSON.stringify(vals));
-      return batchOut_(b.obj, 0);
-    }
-    if (!canAccess_(user, d.companyId, d.branchId)) throw new Error('ไม่มีสิทธิ์บริษัท/สาขานี้');
-    const obj = Object.assign(
-      { batch_id: newId_('DB'), company_id: d.companyId, branch_id: d.branchId, dispatch_date: new Date() },
-      vals,
-      { batch_status: 'open', created_by: user.email, created_at: new Date() }
-    );
-    append_('DispatchBatches', obj);
-    audit_(user.email, 'create', 'DispatchBatches', obj.batch_id, 'set_status_id', '', obj.set_status_id);
-    return batchOut_(obj, 0);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function getBatch_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const b = batchRow_(p.batchId, user, false);
-  const items = readAll_('DispatchItems').filter(function (i) { return i.batch_id === b.obj.batch_id; });
-  const ships = {};
-  readAll_('Shipments').forEach(function (s) { ships[s.shipment_id] = s; });
-  const photos = readAll_('Attachments')
-    .filter(function (a) { return a.batch_id === b.obj.batch_id; })
-    .map(attachOut_);
-  return {
-    batch: batchOut_(b.obj, items.length),
-    items: items
-      .sort(function (x, y) { return (y.scanned_at || 0) - (x.scanned_at || 0); })
-      .map(function (i) { return itemOut_(i, ships[i.shipment_id]); }),
-    photos: photos,
-  };
-}
-
-/** สแกนเลข track เข้ารอบ: เปลี่ยนสถานะ shipment ตามรอบ และเพิ่มแถว DispatchItems */
-function scanToBatch_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const code = normCode_(p.code);
-  if (!code) throw new Error('ไม่มีเลข track');
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  try {
-    const b = batchRow_(p.batchId, user, true);
-    const bo = b.obj;
-    const dup = readAll_('DispatchItems').filter(function (i) { return i.batch_id === bo.batch_id && i.tracking_no === code; })[0];
-    if (dup) return { duplicate: true, itemId: dup.item_id };
-
-    const now = new Date();
-    const to = bo.set_status_id;
-    const statusName = lookup_('Statuses', 'status_id', 'status_name');
-    const warnings = [];
-    let ship = findRow_('Shipments', 'tracking_no', code);
-    const isNew = !ship;
-
-    if (isNew) {
-      const id = newId_('SH');
-      const token = 'P' + Utilities.getUuid().replace(/-/g, '');
-      const rule = matchRule_(code);
-      const platformIds = readAll_('Platforms').map(function (x) { return x.platform_id; });
-      const carrierIds = readAll_('Carriers').map(function (x) { return x.carrier_id; });
-      append_('Shipments', {
-        shipment_id: id,
-        public_token: token,
-        public_url: publicUrl_(token),
-        company_id: bo.company_id,
-        branch_id: bo.branch_id,
-        tracking_no: code,
-        carrier_id: carrierIds.indexOf(p.carrierId) >= 0 ? p.carrierId : rule ? rule.carrier_id : bo.carrier_id,
-        platform_id: platformIds.indexOf(p.platformId) >= 0 ? p.platformId : rule ? rule.suggest_platform_id : 'OTHER',
-        customer_name: cleanName_(p.customerName),
-        status_id: to,
-        pack_count: 0,
-        shipped_at: to === CONFIG.STATUS_SHIPPED ? now : '',
-        last_batch_id: bo.batch_id,
-        root_shipment_id: id,
-        attempt_no: 1,
-        drive_folder_id: trackingFolder_(bo.company_id, bo.branch_id, now, code).getId(),
-        created_by: user.email,
-        created_at: now,
-        updated_by: user.email,
-        updated_at: now,
-      });
-      addHistory_(id, '', to, bo.batch_id, user.email, now, '');
-      ship = findRow_('Shipments', 'shipment_id', id);
-      warnings.push('เลขใหม่ ยังไม่มีวิดีโอแพค');
-    } else {
-      const s = ship.obj;
-      if (Number(s.pack_count || 0) === 0) warnings.push('ยังไม่มีวิดีโอแพค');
-      if (s.company_id !== bo.company_id || s.branch_id !== bo.branch_id) warnings.push('เลขนี้บันทึกไว้ที่บริษัท/สาขาอื่น');
-      if (s.status_id === to) warnings.push('สถานะเป็น "' + (statusName[to] || to) + '" อยู่แล้ว');
-      const changes = { last_batch_id: bo.batch_id, updated_by: user.email, updated_at: now };
-      if (s.status_id !== to) {
-        addHistory_(s.shipment_id, s.status_id, to, bo.batch_id, user.email, now, '');
-        changes.status_id = to;
-      }
-      if (to === CONFIG.STATUS_SHIPPED) changes.shipped_at = now;
-      update_(ship, changes);
-    }
-
-    const item = {
-      item_id: newId_('DI'),
-      batch_id: bo.batch_id,
-      shipment_id: ship.obj.shipment_id,
-      tracking_no: code,
-      scanned_at: now,
-      scanned_by: user.email,
-      is_new_shipment: isNew,
-      box_count: 1,
-    };
-    append_('DispatchItems', item);
-    audit_(user.email, 'dispatch', 'DispatchItems', item.item_id, 'tracking_no', '', code);
-    return { item: itemOut_(item, ship.obj), warnings: warnings };
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function updateItem_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const it = findRow_('DispatchItems', 'item_id', p.itemId);
-  if (!it) throw new Error('ไม่พบรายการนี้');
-  batchRow_(it.obj.batch_id, user, false);
-  const map = { courierTrackingNo: 'courier_tracking_no', shippingCost: 'shipping_cost', costNote: 'cost_note', note: 'note', boxCount: 'box_count' };
-  const changes = {};
-  Object.keys(map).forEach(function (k) {
-    if (p[k] === undefined) return;
-    let v = p[k] === null ? '' : String(p[k]).trim();
-    if (k === 'shippingCost') v = v === '' ? '' : Number(v) || 0;
-    if (k === 'boxCount') v = boxCount_(v);
-    if (k === 'courierTrackingNo') v = String(v).toUpperCase();
-    changes[map[k]] = v;
-  });
-  if (Object.keys(changes).length) {
-    update_(it, changes);
-    audit_(user.email, 'update', 'DispatchItems', it.obj.item_id, 'fields', '', JSON.stringify(changes));
-  }
-  // ชื่อลูกค้าเป็นข้อมูลของพัสดุ เก็บที่ Shipments (ใช้ร่วมกันทุกรอบส่ง/รอบรับคืน)
-  if (p.customerName !== undefined) {
-    const ship = findRow_('Shipments', 'shipment_id', it.obj.shipment_id);
-    const name = cleanName_(p.customerName);
-    if (ship && name !== String(ship.obj.customer_name || '')) {
-      update_(ship, { customer_name: name, updated_by: user.email, updated_at: new Date() });
-      audit_(user.email, 'update', 'Shipments', ship.obj.shipment_id, 'customer_name', ship.obj.customer_name, name);
-    }
-  }
-  return { ok: true };
-}
-
-/** เอารายการออกจากรอบ (สแกนผิด) และคืนสถานะเดิมของ shipment ถ้ารอบนี้เป็นคนเปลี่ยน */
-function removeItem_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  try {
-    const it = findRow_('DispatchItems', 'item_id', p.itemId);
-    if (!it) throw new Error('ไม่พบรายการนี้');
-    const b = liveBatchRow_(it.obj.batch_id, user);
-    if (!removeOrphanShipment_(it.obj, user)) revertItemStatus_(it.obj, b.obj, user, 'เอาออกจากรอบส่ง');
-    it.sh.deleteRow(it.row);
-    audit_(user.email, 'remove', 'DispatchItems', it.obj.item_id, 'tracking_no', it.obj.tracking_no, '');
-    return { ok: true };
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-/** คืนสถานะ shipment เป็นค่าก่อนเข้ารอบนี้ (ถ้ารอบนี้เป็นคนเปลี่ยน และยังไม่มีใครเปลี่ยนต่อ) */
-function revertItemStatus_(item, batch, user, note) {
-  const ship = findRow_('Shipments', 'shipment_id', item.shipment_id);
-  const hist = readAll_('StatusHistory')
-    .filter(function (h) { return h.shipment_id === item.shipment_id && h.batch_id === batch.batch_id; })
-    .pop();
-  if (ship && hist && hist.from_status_id && ship.obj.status_id === hist.to_status_id) {
-    addHistory_(ship.obj.shipment_id, hist.to_status_id, hist.from_status_id, batch.batch_id, user.email, new Date(), note);
-    const changes = { status_id: hist.from_status_id, updated_by: user.email, updated_at: new Date() };
-    if (hist.to_status_id === CONFIG.STATUS_SHIPPED) changes.shipped_at = '';
-    update_(ship, changes);
-  }
-}
-
-/**
- * เลขที่เพิ่งถูกสร้างจากการสแกนในรอบนี้ และยังไม่มีข้อมูลอื่นผูกอยู่ (สแกนผิด)
- * ลบ shipment และประวัติทิ้ง จะได้ไม่เหลือเลขผิดค้างในระบบ คืนค่า true ถ้าลบแล้ว
- */
-function removeOrphanShipment_(item, user) {
-  if (!isTrue_(item.is_new_shipment)) return false;
-  const id = item.shipment_id;
-  const ship = findRow_('Shipments', 'shipment_id', id);
-  if (!ship || Number(ship.obj.pack_count || 0) > 0) return false;
-  const inUse =
-    readAll_('DispatchItems').some(function (i) { return i.shipment_id === id && i.item_id !== item.item_id; }) ||
-    readAll_('PackSessions').some(function (s) { return s.shipment_id === id; }) ||
-    readAll_('Attachments').some(function (a) { return a.shipment_id === id; });
-  if (inUse) return false;
-  rowsOf_('StatusHistory')
-    .filter(function (h) { return h.obj.shipment_id === id; })
-    .reverse()
-    .forEach(function (h) { h.sh.deleteRow(h.row); });
-  ship.sh.deleteRow(ship.row);
-  audit_(user.email, 'delete', 'Shipments', id, 'tracking_no', item.tracking_no, '');
-  return true;
-}
-
-/**
- * ยกเลิกรอบที่เปิดผิด: เอาทุกออเดอร์ออก (คืนสถานะเดิม) ลบรูปของรอบ แล้วตั้งรอบเป็น cancelled
- * เก็บแถวรอบไว้เป็นประวัติ แต่จะไม่แสดงในรายการรอบอีก
- */
-function cancelBatch_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  try {
-    return cancelBatchCore_(liveBatchRow_(p.batchId, user), user);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-/** ต้องถือ script lock ก่อนเรียก */
-function cancelBatchCore_(b, user) {
-  const id = b.obj.batch_id;
-  const before = b.obj.batch_status;
-  // ลบจากแถวล่างขึ้นบน เลขแถวที่อ่านไว้จะได้ไม่เลื่อน
-  const photos = rowsOf_('Attachments').filter(function (r) { return r.obj.batch_id === id; }).reverse();
-  photos.forEach(function (r) {
-    trashFile_(r.obj.file_id);
-    r.sh.deleteRow(r.row);
-  });
-  const items = rowsOf_('DispatchItems').filter(function (r) { return r.obj.batch_id === id; }).reverse();
-  items.forEach(function (r) {
-    if (!removeOrphanShipment_(r.obj, user)) revertItemStatus_(r.obj, b.obj, user, 'ยกเลิกรอบส่ง');
-    r.sh.deleteRow(r.row);
-  });
-  update_(b, { batch_status: 'cancelled', closed_at: new Date() });
-  audit_(user.email, 'cancel', 'DispatchBatches', id, 'batch_status', before, 'cancelled · ' + items.length + ' items, ' + photos.length + ' photos');
-  return { items: items.length, photos: photos.length };
-}
-
-function trashFile_(fileId) {
-  if (!fileId) return;
-  try {
-    DriveApp.getFileById(fileId).setTrashed(true);
-  } catch (e) {
-    console.warn('trash file failed', fileId, e.message);
-  }
-}
-
-/**
- * ปุ่มลบใน AppSheet แค่ตั้งคำขอไว้ งานอัตโนมัติจะลบไฟล์และแถวที่เกี่ยวข้องให้ครบ
- * (ลบแถวใน AppSheet ตรง ๆ จะทิ้งวิดีโอ รูป และประวัติค้างไว้)
- * - DispatchBatches: batch_status = cancel_requested
- * - Shipments: status_id = ST-DELETING
- */
-function processDeleteRequests_() {
-  readAll_('DispatchBatches')
-    .filter(function (b) { return b.batch_status === 'cancel_requested'; })
-    .forEach(function (x) {
-      const b = findRow_('DispatchBatches', 'batch_id', x.batch_id);
-      const by = { email: normEmail_(x.cancel_requested_by) || 'appsheet' };
-      cancelBatchCore_(b, by);
-      b.sh.deleteRow(b.row);
-      audit_(by.email, 'delete', 'DispatchBatches', x.batch_id, 'batch_id', x.batch_id, '');
+  async function tx(mode, fn) {
+    const db = await open();
+    if (!db) return fn(null);
+    return new Promise(function (resolve, reject) {
+      const t = db.transaction('queue', mode);
+      const store = t.objectStore('queue');
+      const req = fn(store);
+      t.oncomplete = function () { resolve(req && req.result); };
+      t.onerror = function () { reject(t.error); };
     });
-  readAll_('Shipments')
-    .filter(function (s) { return s.status_id === CONFIG.STATUS_DELETING; })
-    .forEach(function (x) { deleteShipmentCore_(x.shipment_id, normEmail_(x.updated_by) || 'appsheet'); });
-}
-
-/** ลบ shipment พร้อมวิดีโอ รูปของออเดอร์ รายการในรอบส่ง และประวัติสถานะ */
-function deleteShipmentCore_(id, by) {
-  const ship = findRow_('Shipments', 'shipment_id', id);
-  if (!ship) return;
-  const linked = readAll_('Shipments').some(function (s) {
-    return s.shipment_id !== id && (s.parent_shipment_id === id || s.root_shipment_id === id);
-  });
-  if (linked) {
-    // มีการส่งแก้ต่อจากเลขนี้ ลบไม่ได้ ให้กลับเป็นสถานะล่าสุดก่อนขอลบ
-    const last = readAll_('StatusHistory').filter(function (h) { return h.shipment_id === id; }).pop();
-    update_(ship, { status_id: last ? last.to_status_id : CONFIG.STATUS_PACKED });
-    audit_(by, 'error', 'Shipments', id, 'delete', '', 'ลบไม่ได้ เพราะมีการส่งแก้ต่อจากเลขนี้');
-    return;
   }
-  const of = function (table) {
-    return rowsOf_(table).filter(function (r) { return r.obj.shipment_id === id; }).reverse();
-  };
-  const clips = of('PackSessions');
-  clips.forEach(function (r) {
-    if (r.obj.upload_status !== 'deleted') trashFile_(r.obj.video_file_id);
-    r.sh.deleteRow(r.row);
-  });
-  const photos = of('Attachments');
-  photos.forEach(function (r) {
-    trashFile_(r.obj.file_id);
-    r.sh.deleteRow(r.row);
-  });
-  const items = of('DispatchItems');
-  items.forEach(function (r) { r.sh.deleteRow(r.row); });
-  of('StatusHistory').forEach(function (r) { r.sh.deleteRow(r.row); });
-  ship.sh.deleteRow(ship.row);
-  audit_(by, 'delete', 'Shipments', id, 'tracking_no', ship.obj.tracking_no,
-    clips.length + ' clips, ' + photos.length + ' photos, ' + items.length + ' dispatch items');
-}
-
-/** รูปของรอบ (ไม่มี shipmentId) หรือรูปของออเดอร์ ส่งมาเป็น JPEG base64 ที่ย่อแล้ว */
-function uploadPhoto_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const b = batchRow_(p.batchId, user, false);
-  let folder;
-  let shipmentId = '';
-  if (p.shipmentId) {
-    const ship = findRow_('Shipments', 'shipment_id', p.shipmentId);
-    if (!ship) throw new Error('ไม่พบ shipment');
-    shipmentId = ship.obj.shipment_id;
-    folder = liveFolder_(ship.obj.drive_folder_id) ||
-      trackingFolder_(ship.obj.company_id, ship.obj.branch_id, new Date(), ship.obj.tracking_no);
-  } else {
-    folder = batchFolder_(b.obj);
-  }
-  const type = String(p.attachType || 'อื่น ๆ');
-  const name = type + '_' + Utilities.formatDate(new Date(), CONFIG.TZ, 'yyyyMMdd-HHmmss') + '.jpg';
-  const file = folder.createFile(Utilities.newBlob(Utilities.base64Decode(p.data), 'image/jpeg', name));
-  const show = p.showPublic !== false;
-  if (show) file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  const a = {
-    attach_id: newId_('AT'),
-    batch_id: b.obj.batch_id,
-    shipment_id: shipmentId,
-    attach_type: type,
-    file_id: file.getId(),
-    file_url: file.getUrl(),
-    caption: String(p.caption || ''),
-    uploaded_by: user.email,
-    uploaded_at: new Date(),
-    show_public: show,
-  };
-  append_('Attachments', a);
-  audit_(user.email, 'upload', 'Attachments', a.attach_id, 'file_id', '', a.file_id);
-  return attachOut_(a);
-}
-
-/** เปิด/ปิดการโชว์รูปให้ลูกค้า (ปิด = ถอดลิงก์สาธารณะของไฟล์ด้วย) */
-function setPhotoPublic_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const a = findRow_('Attachments', 'attach_id', p.attachId);
-  if (!a) throw new Error('ไม่พบรูปนี้');
-  if (a.obj.batch_id) batchRow_(a.obj.batch_id, user, false);
-  const show = !!p.showPublic;
-  if (show) {
-    DriveApp.getFileById(a.obj.file_id).setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  } else {
-    try {
-      Drive.Permissions.remove(a.obj.file_id, 'anyoneWithLink');
-    } catch (e) {
-      // ไม่มีลิงก์สาธารณะอยู่แล้ว ถือว่าซ่อนสำเร็จ
-      if (!/not found/i.test(e.message)) throw e;
-    }
-  }
-  update_(a, { show_public: show });
-  audit_(user.email, 'update', 'Attachments', a.obj.attach_id, 'show_public', !show, show);
-  return { ok: true };
-}
-
-function deletePhoto_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const a = findRow_('Attachments', 'attach_id', p.attachId);
-  if (!a) throw new Error('ไม่พบรูปนี้');
-  if (a.obj.batch_id) batchRow_(a.obj.batch_id, user, false);
-  try {
-    DriveApp.getFileById(a.obj.file_id).setTrashed(true);
-  } catch (e) {
-    console.warn('trash photo failed', e.message);
-  }
-  a.sh.deleteRow(a.row);
-  audit_(user.email, 'delete', 'Attachments', a.obj.attach_id, 'file_id', a.obj.file_id, '');
-  return { ok: true };
-}
-
-/**
- * บันทึกค่าส่งหลายออเดอร์ในรอบพร้อมกัน (จากหน้าแบ่งค่าเหมารถ ที่เติมค่าเฉลี่ยให้ก่อนแล้วพนักงานปรับเอง)
- * p.costs = [{ itemId, cost, boxCount }] ; cost ว่าง = ล้างค่า, boxCount ไม่ส่งมา = ไม่เปลี่ยน
- */
-function setItemCosts_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const b = batchRow_(p.batchId, user, false);
-  const map = {};
-  (p.costs || []).forEach(function (c) { map[c.itemId] = c; });
-  const rows = rowsOf_('DispatchItems').filter(function (r) {
-    return r.obj.batch_id === b.obj.batch_id && Object.prototype.hasOwnProperty.call(map, r.obj.item_id);
-  });
-  let total = 0;
-  rows.forEach(function (r) {
-    const c = map[r.obj.item_id];
-    const v = c.cost === '' || c.cost == null ? '' : Math.round(Number(c.cost) * 100) / 100;
-    if (v !== '' && !(v >= 0)) throw new Error('ค่าส่งของ ' + r.obj.tracking_no + ' ไม่ถูกต้อง');
-    total += v || 0;
-    const changes = { shipping_cost: v, cost_note: 'ค่าเหมารถ' };
-    if (c.boxCount !== undefined) changes.box_count = boxCount_(c.boxCount);
-    update_(r, changes);
-  });
-  audit_(user.email, 'set_costs', 'DispatchBatches', b.obj.batch_id, 'shipping_cost', '', rows.length + ' items = ' + total);
-  return { count: rows.length, total: total };
-}
-
-function closeBatch_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const b = batchRow_(p.batchId, user, true);
-  update_(b, { batch_status: 'closed', closed_at: new Date() });
-  audit_(user.email, 'close', 'DispatchBatches', b.obj.batch_id, 'batch_status', 'open', 'closed');
-  return { ok: true };
-}
-
-/** จำนวนลัง: จำนวนเต็มตั้งแต่ 1 ขึ้นไป (ว่างหรือผิด = 1) */
-function boxCount_(v) {
-  const n = Math.floor(Number(v));
-  return n >= 1 ? n : 1;
-}
-
-/** รอบที่ยังไม่ถูกยกเลิก (เปิดอยู่หรือปิดแล้วก็ได้) ใช้กับการแก้ไขและลบข้อมูลในรอบ */
-function liveBatchRow_(batchId, user) {
-  const b = batchRow_(batchId, user, false);
-  if (b.obj.batch_status === 'cancelled') throw new Error('รอบส่งนี้ถูกยกเลิกแล้ว');
-  return b;
-}
-
-function batchRow_(batchId, user, mustBeOpen) {
-  const b = findRow_('DispatchBatches', 'batch_id', batchId);
-  if (!b) throw new Error('ไม่พบรอบส่งนี้');
-  if (!canAccess_(user, b.obj.company_id, b.obj.branch_id)) throw new Error('ไม่มีสิทธิ์รอบส่งนี้');
-  if (mustBeOpen && b.obj.batch_status !== 'open') throw new Error('รอบส่งนี้ปิดแล้ว');
-  return b;
-}
-
-function batchOut_(b, itemCount) {
   return {
-    id: b.batch_id,
-    companyId: b.company_id,
-    branchId: b.branch_id,
-    date: fmt_(b.dispatch_date, 'yyyy-MM-dd'),
-    carrierId: b.carrier_id || '',
-    courierName: b.courier_name || '',
-    courierPhone: b.courier_phone || '',
-    vehiclePlate: b.vehicle_plate || '',
-    driverName: b.driver_name || '',
-    driverPhone: b.driver_phone || '',
-    billNo: b.bill_no || '',
-    statusId: b.set_status_id,
-    tripCost: b.trip_cost === '' || b.trip_cost == null ? '' : Number(b.trip_cost),
-    details: b.details || '',
-    open: b.batch_status === 'open',
-    cancelled: b.batch_status === 'cancelled',
-    createdBy: b.created_by,
-    createdAt: fmt_(b.created_at),
-    itemCount: itemCount,
-  };
-}
-
-function itemOut_(i, s) {
-  s = s || {};
-  return {
-    id: i.item_id,
-    shipmentId: i.shipment_id,
-    trackingNo: i.tracking_no,
-    platformId: s.platform_id || '',
-    carrierId: s.carrier_id || '',
-    packCount: Number(s.pack_count || 0),
-    publicUrl: s.public_url || '',
-    courierTrackingNo: i.courier_tracking_no || '',
-    shippingCost: i.shipping_cost === '' || i.shipping_cost == null ? '' : Number(i.shipping_cost),
-    costNote: i.cost_note || '',
-    note: i.note || '',
-    customerName: s.customer_name || '',
-    boxCount: boxCount_(i.box_count),
-    isNew: isTrue_(i.is_new_shipment),
-    scannedAt: fmt_(i.scanned_at, 'HH:mm'),
-  };
-}
-
-function attachOut_(a) {
-  return {
-    id: a.attach_id,
-    shipmentId: a.shipment_id || '',
-    type: a.attach_type,
-    fileId: a.file_id,
-    caption: a.caption || '',
-    showPublic: String(a.show_public).toUpperCase() !== 'FALSE',
-  };
-}
-
-// ---------------------------------------------------------------- delete & retention
-
-/** Admin และ Editor ลบคลิปของบริษัท/สาขาที่ตัวเองมีสิทธิ์ได้ทุกคลิป */
-function deleteVideo_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const ps = findRow_('PackSessions', 'session_id', p.sessionId);
-  if (!ps) throw new Error('ไม่พบคลิปนี้');
-  if (ps.obj.upload_status !== 'done') throw new Error('คลิปนี้ลบไปแล้วหรือยังอัปโหลดไม่เสร็จ');
-  const ship = findRow_('Shipments', 'shipment_id', ps.obj.shipment_id);
-  if (ship ? !canAccess_(user, ship.obj.company_id, ship.obj.branch_id) : user.role !== 'Admin') {
-    throw new Error('ไม่มีสิทธิ์ลบคลิปของบริษัท/สาขานี้');
-  }
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  try {
-    softDeleteSession_(ps, user.email, 'station');
-  } finally {
-    lock.releaseLock();
-  }
-  return { deleted: true };
-}
-
-// ---------------------------------------------------------------- customer name & OCR
-
-function cleanName_(v) {
-  return String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, 100);
-}
-
-/**
- * อ่านชื่อผู้รับจากภาพใบปะหน้า (JPEG base64) ด้วย OCR ของ Google Docs
- * ไฟล์ชั่วคราวถูกลบถาวรทันทีหลังอ่าน ไม่เก็บภาพใบปะหน้าไว้ใน Drive
- */
-function ocrLabel_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  if (!p.data) throw new Error('ไม่มีภาพ');
-  const text = ocrText_(Utilities.base64Decode(p.data));
-  return { name: extractReceiver_(text, { ignore: ownNames_(), cropped: !!p.cropped }), found: !!text.trim() };
-}
-
-/** ชื่อบริษัทเราเอง ห้ามได้เป็นชื่อผู้รับ (ชื่อใน Companies + Settings: ocr_ignore_names คั่นด้วย ,) */
-function ownNames_() {
-  const extra = String(setting_('ocr_ignore_names', '', '')).split(',');
-  return readAll_('Companies').map(function (c) { return c.company_name; }).concat(extra);
-}
-
-function ocrText_(bytes) {
-  const blob = Utilities.newBlob(bytes, 'image/jpeg', 'label.jpg');
-  const doc = Drive.Files.create({ name: 'packtrack-ocr-tmp', mimeType: 'application/vnd.google-apps.document' }, blob, {
-    ocrLanguage: 'th',
-    fields: 'id',
-  });
-  try {
-    const res = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + doc.id + '/export?mimeType=text/plain', {
-      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
-      muteHttpExceptions: true,
-    });
-    if (res.getResponseCode() !== 200) throw new Error('อ่านข้อความจากภาพไม่สำเร็จ (' + res.getResponseCode() + ')');
-    return res.getContentText('UTF-8');
-  } finally {
-    try {
-      Drive.Files.remove(doc.id);
-    } catch (e) {
-      console.warn('remove ocr temp failed', e.message);
-    }
-  }
-}
-
-/**
- * หาชื่อผู้รับจากข้อความ OCR ของใบปะหน้า
- * คำนำหน้าที่พบ: "ผู้รับ (TO)" (Shopee), "ผู้รับ:" (iShip/DHL/Ecount), "ถึง" (TikTok), "Receiver:" (Lazada)
- * ข้ามบรรทัดผู้ส่ง และตัดเบอร์โทร/ที่อยู่ที่ติดมาท้ายชื่อ
- */
-function extractReceiver_(text, opts) {
-  opts = opts || {};
-  const lines = String(text || '').split(/\r?\n/).map(function (l) { return l.replace(/\s+/g, ' ').trim(); }).filter(Boolean);
-  const own = (opts.ignore || []).map(squash_).filter(function (n) { return n.length >= 3; });
-  const isOwn = function (s) { const q = squash_(s); return own.some(function (n) { return q.indexOf(n) >= 0; }); };
-  // OCR มักทำวรรณยุกต์หาย เช่น "ผู้ส่ง" เป็น "ผู้สง" หรือ "ผูส่ง" จึงเผื่อตัวอักษรระหว่างไว้
-  const RECV = /ผู\S{0,2}รับ/;
-  const isSender = function (l) { return /ผู\S{0,2}ส\S{0,2}ง|Sender|\bFROM\b|^จาก\b/i.test(l) && !RECV.test(l) && !/Receiver/i.test(l); };
-  const notName = function (s) { return !s || isOwn(s) || isSender(s) || /^(ที่\s*อยู่|โทร|Tel|Phone|Address)/i.test(s); };
-  const keys = [/ผู\S{0,2}รับ\s*(\(\s*TO\s*\))?\s*[:：]?/i, /Receiver\s*[:：]?/i, /^ถึง\s*[:：]?/, /^TO\s*[:：]/i];
-  for (let k = 0; k < keys.length; k++) {
-    for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(keys[k]);
-      if (!m) continue;
-      // ข้อความหลังคำว่า "ผู้รับ" ในบรรทัดเดียวกัน หรือบรรทัดถัด ๆ ไป (ข้ามบรรทัดที่อยู่/ผู้ส่ง/ชื่อบริษัทเรา)
-      const cands = [lines[i].slice(m.index + m[0].length)].concat(lines.slice(i + 1, i + 7));
-      for (let c = 0; c < cands.length; c++) {
-        const raw = cands[c].trim();
-        if (notName(raw)) continue;
-        const name = trimReceiver_(raw);
-        if (name && !isOwn(name)) return name;
-      }
-    }
-  }
-  // ภาพที่ครอปมาแค่ชื่อ อาจไม่มีคำว่า "ผู้รับ" ให้ใช้บรรทัดแรกที่เป็นชื่อได้
-  if (opts.cropped) {
-    for (let i = 0; i < lines.length; i++) {
-      const raw = lines[i].replace(/^.*?(ผู\S{0,2}รับ|Receiver|ถึง)\s*(\(\s*TO\s*\))?\s*[:：]?/i, '').trim();
-      if (notName(raw)) continue;
-      const name = trimReceiver_(raw);
-      if (name && !isOwn(name)) return name;
-    }
-  }
-  return '';
-}
-
-function squash_(s) {
-  return String(s || '').toLowerCase().replace(/[\s.,()\-]/g, '').replace(/co(mpany)?ltd|จำกัด|บริษัท/g, '');
-}
-
-function trimReceiver_(s) {
-  let v = String(s || '');
-  // ตัดตั้งแต่เบอร์โทร / ที่อยู่ / ตัวเลขยาว
-  v = v.split(/\s*(?:โทร|Tel|Phone|\(\+?66\)|\+66|0\d[\d\-* ]{7,}|\d{3,}|เลขที่|ม\.\s*\d|หมู่|ถ\.|ต\.|อ\.|จ\.)/i)[0];
-  v = v.replace(/^[\s:：\-–(]+|[\s,:：\-–]+$/g, '').trim();
-  if (v.length < 2) return '';
-  return v.slice(0, 60);
-}
-
-/** คลิปที่ยังอยู่ของเลข track นี้ สำหรับค้นดูและลบจากหน้าแพค/หน้าจัดส่ง */
-function listClips_(p, user) {
-  requireRole_(user, CONFIG.PACK_ROLES);
-  const code = normCode_(p.code);
-  const ship = findRow_('Shipments', 'tracking_no', code);
-  if (!ship) return { trackingNo: code, found: false, clips: [] };
-  if (!canAccess_(user, ship.obj.company_id, ship.obj.branch_id)) throw new Error('ไม่มีสิทธิ์ดูเลขนี้');
-  const names = lookup_('Users', 'email', 'display_name');
-  const clips = readAll_('PackSessions')
-    .filter(function (s) { return s.shipment_id === ship.obj.shipment_id && s.upload_status === 'done'; })
-    .sort(function (a, b) { return (b.start_time || 0) - (a.start_time || 0); })
-    .map(function (s) {
-      return {
-        sessionId: s.session_id,
-        at: fmt_(s.start_time),
-        sec: Number(s.duration_sec || 0),
-        packer: names[s.packer_email] || s.packer_email,
-        videoUrl: s.video_url,
-      };
-    });
-  return { trackingNo: code, found: true, clips: clips };
-}
-
-/**
- * ทำงานทุก 10 นาที (ตั้งด้วย installTriggers)
- * 1) ให้สิทธิ์ดูโฟลเดอร์ Media ตามแท็บ UserAccess
- * 2) ลบพัสดุและรอบส่งที่ขอลบจาก AppSheet
- * 3) ลบคลิปที่ AppSheet ตั้ง upload_status = delete_requested
- * 4) ลบคลิปที่เก่ากว่า video_retention_days
- */
-function scheduledJobs() {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) return;
-  const t0 = Date.now();
-  try {
-    try {
-      syncMediaAccess_(false);
-    } catch (e) {
-      console.error('syncMediaAccess failed', e);
-    }
-    processDeleteRequests_();
-    const shipCompany = {};
-    readAll_('Shipments').forEach(function (s) { shipCompany[s.shipment_id] = s.company_id; });
-    const minDays = Number(setting_('video_retention_min_days', '', 7));
-    const now = Date.now();
-    rowsOf_('PackSessions').some(function (ps) {
-      if (Date.now() - t0 > 4.5 * 60000) return true; // กันเกินเวลา 6 นาทีของ Apps Script
-      const st = ps.obj.upload_status;
-      if (st === 'delete_requested') {
-        softDeleteSession_(ps, ps.obj.deleted_by || 'appsheet', 'appsheet');
-      } else if (st === 'done') {
-        const company = shipCompany[ps.obj.shipment_id] || '';
-        const days = Math.max(minDays, Number(setting_('video_retention_days', company, 30)));
-        const started = ps.obj.start_time instanceof Date ? ps.obj.start_time.getTime() : now;
-        if (now - started > days * 86400000) softDeleteSession_(ps, 'system', 'retention ' + days + ' days');
-      }
-      return false;
-    });
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-/** รันเองใน editor เมื่อต้องการให้สิทธิ์โฟลเดอร์ทันที โดยไม่รอรอบ 10 นาที */
-function syncMediaAccessNow() {
-  Logger.log(JSON.stringify(syncMediaAccess_(true)));
-}
-
-/**
- * ให้ผู้ใช้เปิดรูป/วิดีโอใน Drive ได้ (รวมรูปที่ไม่โชว์ลูกค้า) โดยแชร์แบบ Viewer เฉพาะโฟลเดอร์ใต้ Media
- * branch_id ว่าง = โฟลเดอร์บริษัท, มี branch_id = โฟลเดอร์สาขา, Admin = ทุกบริษัท
- * ห้ามแชร์โฟลเดอร์ราก เพราะมี PackTrack_DB อยู่ข้างใน
- * ถอนสิทธิ์เฉพาะคนที่ระบบเคยให้ไว้ คนที่แชร์เองด้วยมือจะไม่ถูกแตะ
- */
-function syncMediaAccess_(force) {
-  const active = {};
-  const admins = [];
-  readAll_('Users').forEach(function (u) {
-    if (!isTrue_(u.active)) return;
-    const email = normEmail_(u.email);
-    active[email] = true;
-    if (String(u.role) === 'Admin') admins.push(email);
-  });
-  const companies = readAll_('Companies');
-  const branches = readAll_('Branches');
-  const want = { co: {}, br: {} };
-  companies.forEach(function (c) { want.co[c.company_id] = admins.slice(); });
-  branches.forEach(function (b) { want.br[b.branch_id] = []; });
-  readAll_('UserAccess').forEach(function (a) {
-    const email = normEmail_(a.email);
-    if (!active[email]) return;
-    const list = a.branch_id ? want.br[a.branch_id] : want.co[a.company_id];
-    if (list && list.indexOf(email) < 0) list.push(email);
-  });
-  [want.co, want.br].forEach(function (m) { Object.keys(m).forEach(function (k) { m[k].sort(); }); });
-
-  const props = PropertiesService.getScriptProperties();
-  const sig = JSON.stringify(want);
-  const prevRaw = props.getProperty('media_acl');
-  if (!force && prevRaw === sig) return { changed: false };
-  const prev = prevRaw ? JSON.parse(prevRaw) : { co: {}, br: {} };
-
-  const media = childFolder_(DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID), CONFIG.MEDIA_FOLDER_NAME);
-  const result = { changed: true, added: 0, removed: 0, failed: 0 };
-  companies.forEach(function (c) {
-    const folder = childFolder_(media, c.company_name);
-    applyViewers_(folder.getId(), want.co[c.company_id], (prev.co || {})[c.company_id] || [], [], result);
-  });
-  branches.forEach(function (b) {
-    const folder = branchFolder_(b.company_id, b.branch_id);
-    applyViewers_(folder.getId(), want.br[b.branch_id], (prev.br || {})[b.branch_id] || [], want.co[b.company_id] || [], result);
-  });
-  props.setProperty('media_acl', sig);
-  audit_('system', 'media_access', 'UserAccess', '', 'viewers', '', JSON.stringify(result));
-  return result;
-}
-
-/** เพิ่ม Viewer ที่ขาด และถอนคนที่เคยได้สิทธิ์แต่ไม่อยู่ในรายการแล้ว (ไม่ส่งอีเมลแจ้ง) */
-function applyViewers_(folderId, want, prev, keep, result) {
-  const perms = Drive.Permissions.list(folderId, { fields: 'permissions(id,type,role,emailAddress)', pageSize: 100 }).permissions || [];
-  const have = {};
-  perms.forEach(function (x) { if (x.type === 'user' && x.emailAddress) have[normEmail_(x.emailAddress)] = x; });
-  want.forEach(function (email) {
-    if (have[email]) return;
-    try {
-      Drive.Permissions.create({ role: 'reader', type: 'user', emailAddress: email }, folderId, { sendNotificationEmail: false });
-      result.added++;
-    } catch (e) {
-      result.failed++;
-      audit_('system', 'error', 'UserAccess', email, 'media_access', '', e.message);
-    }
-  });
-  prev.forEach(function (email) {
-    const x = have[email];
-    if (!x || x.role !== 'reader' || want.indexOf(email) >= 0 || keep.indexOf(email) >= 0) return;
-    try {
-      Drive.Permissions.remove(folderId, x.id);
-      result.removed++;
-    } catch (e) {
-      // สิทธิ์ที่สืบทอดจากโฟลเดอร์แม่ถอนที่นี่ไม่ได้
-      console.warn('remove viewer failed', email, e.message);
-    }
-  });
-}
-
-/** ลบไฟล์วิดีโอ แต่เก็บแถวไว้ (upload_status = deleted) */
-function softDeleteSession_(ps, by, reason) {
-  const ship = findRow_('Shipments', 'shipment_id', ps.obj.shipment_id);
-  const mode = String(setting_('video_delete_mode', ship ? ship.obj.company_id : '', 'trash'));
-  const fileId = ps.obj.video_file_id;
-  if (fileId) {
-    try {
-      if (mode === 'permanent') Drive.Files.remove(fileId);
-      else DriveApp.getFileById(fileId).setTrashed(true);
-    } catch (e) {
-      // ไฟล์ถูกลบไปก่อนแล้ว ให้ทำต่อ
-      console.warn('delete file failed', fileId, e.message);
-    }
-  }
-  update_(ps, { upload_status: 'deleted', deleted_by: by, deleted_at: new Date() });
-  if (ship) {
-    update_(ship, { pack_count: Math.max(0, Number(ship.obj.pack_count || 0) - 1), updated_by: by, updated_at: new Date() });
-  }
-  audit_(by, 'delete', 'PackSessions', ps.obj.session_id, 'video_file_id', fileId, mode + ' · ' + reason, ps.obj.station_id);
-}
-
-/** อ่านค่าจากแท็บ Settings: ค่าของบริษัทก่อน ถ้าไม่มีใช้ค่ากลาง */
-function setting_(key, companyId, def) {
-  const rows = readAll_('Settings').filter(function (r) { return r.key === key; });
-  const own = rows.filter(function (r) { return companyId && r.company_id === companyId; })[0];
-  const global = rows.filter(function (r) { return !r.company_id; })[0];
-  const hit = own || global;
-  return hit && hit.value !== '' ? hit.value : def;
-}
-
-// ---------------------------------------------------------------- Drive helpers
-
-function createUploadSession_(folderId, name, mime, size) {
-  const res = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id', {
-    method: 'post',
-    contentType: 'application/json; charset=UTF-8',
-    headers: {
-      Authorization: 'Bearer ' + ScriptApp.getOAuthToken(),
-      'X-Upload-Content-Type': mime,
-      'X-Upload-Content-Length': String(size),
+    put(item) { return tx('readwrite', function (s) { if (!s) { mem.set(item.id, item); return null; } return s.put(item); }); },
+    del(id) { return tx('readwrite', function (s) { if (!s) { mem.delete(id); return null; } return s.delete(id); }); },
+    async all() {
+      const r = await tx('readonly', function (s) { return s ? s.getAll() : null; });
+      return r || Array.from(mem.values());
     },
-    payload: JSON.stringify({ name: name, parents: [folderId], mimeType: mime }),
-    muteHttpExceptions: true,
-  });
-  if (res.getResponseCode() !== 200) {
-    throw new Error('สร้าง upload session ไม่สำเร็จ: ' + res.getContentText().slice(0, 300));
-  }
-  const h = res.getAllHeaders();
-  return h.Location || h.location;
-}
-
-/** ถาม Drive ว่าอัปโหลดไปถึงไหนแล้ว */
-function uploadStatus_(url, total) {
-  const res = UrlFetchApp.fetch(url, {
-    method: 'put',
-    headers: { 'Content-Range': 'bytes */' + total },
-    muteHttpExceptions: true,
-  });
-  const code = res.getResponseCode();
-  if (code === 308) return { offset: rangeEnd_(res) };
-  if (code === 200 || code === 201) return { fileId: JSON.parse(res.getContentText()).id };
-  return { offset: null };
-}
-
-function rangeEnd_(res) {
-  const h = res.getAllHeaders();
-  const r = h.Range || h.range;
-  if (!r) return 0;
-  return Number(String(r).split('-')[1]) + 1;
-}
-
-/** หาโฟลเดอร์ย่อยตามชื่อ (ข้ามโฟลเดอร์ที่อยู่ในถังขยะ) ถ้าไม่มีให้สร้างใหม่ */
-function childFolder_(parent, name) {
-  const it = parent.getFoldersByName(name);
-  while (it.hasNext()) {
-    const f = it.next();
-    if (!f.isTrashed()) return f;
-  }
-  return parent.createFolder(name);
-}
-
-/** เปิดโฟลเดอร์จาก id ที่เก็บไว้ ถ้าไม่มี/ถูกลบ/อยู่ในถังขยะ คืน null */
-function liveFolder_(id) {
-  if (!id) return null;
-  try {
-    const f = DriveApp.getFolderById(id);
-    return f.isTrashed() ? null : f;
-  } catch (e) {
-    return null;
-  }
-}
-
-/** Media/{บริษัท}/{สาขา}/{YYYY-MM}/{tracking} */
-function trackingFolder_(companyId, branchId, date, code) {
-  const month = childFolder_(branchFolder_(companyId, branchId), Utilities.formatDate(date, CONFIG.TZ, 'yyyy-MM'));
-  return childFolder_(month, code);
-}
-
-/** Media/{บริษัท}/{สาขา}/{YYYY-MM}/_batches/{batch_id} สำหรับรูปของทั้งรอบส่ง */
-function batchFolder_(b) {
-  const created = b.created_at instanceof Date ? b.created_at : new Date();
-  const month = childFolder_(branchFolder_(b.company_id, b.branch_id), Utilities.formatDate(created, CONFIG.TZ, 'yyyy-MM'));
-  return childFolder_(childFolder_(month, '_batches'), b.batch_id);
-}
-
-function branchFolder_(companyId, branchId) {
-  const br = findRow_('Branches', 'branch_id', branchId);
-  if (!br) throw new Error('ไม่พบสาขา ' + branchId);
-  let branchFolder = liveFolder_(br.obj.drive_folder_id);
-  if (!branchFolder) {
-    const co = findRow_('Companies', 'company_id', companyId);
-    const root = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID);
-    const media = childFolder_(root, CONFIG.MEDIA_FOLDER_NAME);
-    const coFolder = childFolder_(media, co ? co.obj.company_name : companyId);
-    branchFolder = childFolder_(coFolder, br.obj.branch_name);
-    update_(br, { drive_folder_id: branchFolder.getId() });
-  }
-  return branchFolder;
-}
-
-function fileName_(code, m) {
-  const d = m.startTime ? new Date(m.startTime) : new Date();
-  return code + '_' + Utilities.formatDate(d, CONFIG.TZ, 'yyyyMMdd-HHmmss') + '.webm';
-}
-
-/** ลิงก์ให้ลูกค้า: ใช้ public_base_url ในแท็บ Settings (หน้าบน GitHub) ถ้าไม่มีใช้หน้าของ Apps Script */
-function publicUrl_(token) {
-  const base = String(setting_('public_base_url', '', '') || ScriptApp.getService().getUrl());
-  return base + (base.indexOf('?') >= 0 ? '&' : '?') + 't=' + token;
-}
-
-// ---------------------------------------------------------------- public page
-
-function publicData_(token) {
-  const hit = findRow_('Shipments', 'public_token', token);
-  if (!hit) return null;
-  const rootId = hit.obj.root_shipment_id || hit.obj.shipment_id;
-  const ships = readAll_('Shipments')
-    .filter(function (s) { return (s.root_shipment_id || s.shipment_id) === rootId; })
-    .sort(function (a, b) { return Number(a.attempt_no || 1) - Number(b.attempt_no || 1); });
-  const ids = ships.map(function (s) { return s.shipment_id; });
-  const has = function (id) { return ids.indexOf(id) >= 0; };
-
-  const statusName = lookup_('Statuses', 'status_id', 'status_name');
-  const statusColor = lookup_('Statuses', 'status_id', 'color');
-  const platformName = lookup_('Platforms', 'platform_id', 'platform_name');
-  const carrierName = lookup_('Carriers', 'carrier_id', 'carrier_name');
-  const companyName = lookup_('Companies', 'company_id', 'company_name');
-  const branchName = lookup_('Branches', 'branch_id', 'branch_name');
-  const userName = {};
-  readAll_('Users').forEach(function (u) { userName[normEmail_(u.email)] = u.display_name; });
-  const who = function (email) { return userName[normEmail_(email)] || ''; };
-
-  const allSessions = readAll_('PackSessions').filter(function (x) { return has(x.shipment_id); });
-  const sessions = allSessions.filter(function (x) { return x.upload_status === 'done'; });
-  const history = readAll_('StatusHistory').filter(function (x) { return has(x.shipment_id); });
-  const items = readAll_('DispatchItems').filter(function (x) { return has(x.shipment_id); });
-  const batchIds = items.map(function (x) { return x.batch_id; });
-  const batches = {};
-  readAll_('DispatchBatches').forEach(function (b) { if (batchIds.indexOf(b.batch_id) >= 0) batches[b.batch_id] = b; });
-  // show_public ว่าง = โชว์ (ค่าเริ่มต้น) ซ่อนเฉพาะที่ตั้งเป็น FALSE
-  const attachments = readAll_('Attachments').filter(function (a) {
-    if (String(a.show_public).toUpperCase() === 'FALSE') return false;
-    return has(a.shipment_id) || (a.batch_id && !a.shipment_id && batchIds.indexOf(a.batch_id) >= 0);
-  });
-
-  return {
-    current: hit.obj.tracking_no,
-    attempts: ships.map(function (s) {
-      const myItems = items.filter(function (x) { return x.shipment_id === s.shipment_id; });
-      const myBatchIds = myItems.map(function (x) { return x.batch_id; });
-      return {
-        tracking: s.tracking_no,
-        attempt: Number(s.attempt_no || 1),
-        isCurrent: s.shipment_id === hit.obj.shipment_id,
-        company: companyName[s.company_id] || '',
-        branch: branchName[s.branch_id] || '',
-        carrier: carrierName[s.carrier_id] || '',
-        platform: platformName[s.platform_id] || '',
-        orderNo: s.order_no,
-        status: statusName[s.status_id] || s.status_id,
-        statusColor: statusColor[s.status_id] || '#555',
-        firstPackedAt: fmt_(s.first_packed_at),
-        shippedAt: fmt_(s.shipped_at),
-        returnReason: s.return_reason,
-        videos: sessions
-          .filter(function (x) { return x.shipment_id === s.shipment_id; })
-          .map(function (x) {
-            return { fileId: x.video_file_id, at: fmt_(x.start_time), sec: Number(x.duration_sec || 0), packer: who(x.packer_email) };
-          }),
-        deletedVideos: allSessions.filter(function (x) {
-          return x.shipment_id === s.shipment_id && (x.upload_status === 'deleted' || x.upload_status === 'delete_requested');
-        }).length,
-        history: history
-          .filter(function (x) { return x.shipment_id === s.shipment_id; })
-          .map(function (x) {
-            return { at: fmt_(x.changed_at), to: statusName[x.to_status_id] || x.to_status_id, by: who(x.changed_by), note: x.note };
-          }),
-        dispatches: myItems.map(function (x) {
-          const b = batches[x.batch_id] || {};
-          return {
-            title: statusName[b.set_status_id] || 'การจัดส่ง',
-            date: fmt_(b.dispatch_date, 'dd/MM/yyyy'),
-            carrier: carrierName[b.carrier_id] || '',
-            courierName: b.courier_name,
-            courierPhone: b.courier_phone,
-            vehiclePlate: b.vehicle_plate,
-            driverName: b.driver_name,
-            driverPhone: b.driver_phone,
-            billNo: b.bill_no,
-            courierTrackingNo: x.courier_tracking_no,
-            boxCount: x.box_count,
-            shippingCost: x.shipping_cost,
-            details: b.details,
-          };
-        }),
-        attachments: attachments
-          .filter(function (a) { return a.shipment_id === s.shipment_id || (!a.shipment_id && myBatchIds.indexOf(a.batch_id) >= 0); })
-          .map(function (a) { return { fileId: a.file_id, type: a.attach_type, caption: a.caption, at: fmt_(a.uploaded_at) }; }),
-      };
-    }),
   };
+})();
+
+// ------------------------------------------------------------------ state
+const state = {
+  apiUrl: LS.get('apiUrl', DEFAULT_API_URL),
+  token: LS.get('token', ''),
+  boot: null,
+  setup: LS.get('setup', null),
+  stream: null,
+  rec: null,
+  pumping: false,
+  recent: LS.get('recent', []),
+};
+
+const $ = function (id) { return document.getElementById(id); };
+const video = $('video');
+const cv = $('cv');
+const ctx = cv.getContext('2d');
+
+// ------------------------------------------------------------------ utils
+function show(id, on) { $(id).classList.toggle('hidden', !on); }
+function view(name) {
+  ['vLogin', 'vSetup', 'vStation'].forEach(function (v) { show(v, v === name); });
+  show('hdr', name !== 'vLogin');
 }
-
-// ---------------------------------------------------------------- sheet helpers
-
-let _db = null;
-function db_() {
-  return _db || (_db = SpreadsheetApp.openById(CONFIG.DB_ID));
+let toastTimer = null;
+function toast(msg, ms) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { t.classList.add('hidden'); }, ms || 3500);
 }
-
-function sheet_(name) {
-  const sh = db_().getSheetByName(name);
-  if (!sh) throw new Error('ไม่พบแท็บ ' + name);
-  return sh;
-}
-
-function headers_(sh) {
-  return sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
-}
-
-function readAll_(name) {
-  const v = sheet_(name).getDataRange().getValues();
-  const h = v.shift().map(String);
-  return v
-    .filter(function (r) { return r[0] !== ''; })
-    .map(function (r) {
-      const o = {};
-      h.forEach(function (k, i) { o[k] = r[i]; });
-      return o;
-    });
-}
-
-function cellValue_(key, v) {
-  if (v === undefined || v === null) return '';
-  if (TEXT_KEYS.indexOf(key) >= 0 && typeof v === 'string' && v !== '') return "'" + v;
-  return v;
-}
-
-function append_(name, obj) {
-  const sh = sheet_(name);
-  const h = headers_(sh);
-  sh.appendRow(h.map(function (k) { return cellValue_(k, obj[k]); }));
-}
-
-/** อ่านทุกแถวพร้อมตำแหน่งแถว ใช้กับ update_ ได้ */
-function rowsOf_(name) {
-  const sh = sheet_(name);
-  const v = sh.getDataRange().getValues();
-  const h = v.shift().map(String);
-  const out = [];
-  v.forEach(function (r, i) {
-    if (r[0] === '') return;
-    const obj = {};
-    h.forEach(function (k, j) { obj[k] = r[j]; });
-    out.push({ sh: sh, h: h, row: i + 2, obj: obj });
-  });
-  return out;
-}
-
-function findRow_(name, key, value) {
-  if (value === '' || value === null || value === undefined) return null;
-  const sh = sheet_(name);
-  const h = headers_(sh);
-  const c = h.indexOf(key);
-  if (c < 0) throw new Error('ไม่พบคอลัมน์ ' + key + ' ในแท็บ ' + name);
-  const last = sh.getLastRow();
-  if (last < 2) return null;
-  const cell = sh.getRange(2, c + 1, last - 1, 1).createTextFinder(String(value)).matchEntireCell(true).matchCase(true).findNext();
-  if (!cell) return null;
-  const r = cell.getRow();
-  const vals = sh.getRange(r, 1, 1, h.length).getValues()[0];
-  const obj = {};
-  h.forEach(function (k, i) { obj[k] = vals[i]; });
-  return { sh: sh, h: h, row: r, obj: obj };
-}
-
-function update_(found, changes) {
-  Object.keys(changes).forEach(function (k) {
-    if (found.h.indexOf(k) < 0) throw new Error('ไม่พบคอลัมน์ ' + k);
-    found.obj[k] = changes[k];
-  });
-  const row = found.h.map(function (k) { return cellValue_(k, found.obj[k]); });
-  found.sh.getRange(found.row, 1, 1, row.length).setValues([row]);
-}
-
-function lookup_(name, keyCol, valCol) {
-  const m = {};
-  readAll_(name).forEach(function (r) { m[r[keyCol]] = r[valCol]; });
-  return m;
-}
-
-function addHistory_(shipmentId, fromId, toId, batchId, by, at, note) {
-  append_('StatusHistory', {
-    history_id: newId_('HS'),
-    shipment_id: shipmentId,
-    from_status_id: fromId || '',
-    to_status_id: toId,
-    batch_id: batchId || '',
-    changed_by: by,
-    changed_at: at,
-    note: note || '',
-  });
-}
-
-function audit_(email, action, table, recordId, field, oldV, newV, stationId) {
-  try {
-    SpreadsheetApp.openById(CONFIG.LOG_ID)
-      .getSheetByName('AuditLog')
-      .appendRow([
-        newId_('LG'), new Date(), email || '', action, table || '', recordId || '', field || '',
-        oldV === undefined ? '' : String(oldV), newV === undefined ? '' : String(newV), stationId || '', 'web',
-      ]);
-  } catch (e) {
-    console.error('audit failed', e);
-  }
-}
-
-// ---------------------------------------------------------------- misc helpers
-
-function activeRules_() {
-  return readAll_('BarcodeRules')
-    .filter(function (r) { return isTrue_(r.active) && r.pattern; })
-    .sort(function (a, b) { return Number(a.priority || 999) - Number(b.priority || 999); });
-}
-
-function matchRule_(code) {
-  const rules = activeRules_();
-  for (let i = 0; i < rules.length; i++) {
-    try {
-      if (new RegExp(String(rules[i].pattern)).test(code)) return rules[i];
-    } catch (e) {
-      console.warn('bad pattern', rules[i].rule_id);
-    }
-  }
-  return null;
-}
-
-function newId_(prefix) {
-  return prefix + '-' + Utilities.formatDate(new Date(), CONFIG.TZ, 'yyMMddHHmmss') + '-' + Utilities.getUuid().slice(0, 4).toUpperCase();
-}
-
-// แป้นพิมพ์ไทย (เกษมณี) -> ตัวอักษรที่เครื่องสแกนตั้งใจส่ง (ต้องตรงกับ THAI_KEYS ในหน้า station และ dispatch)
+function uid() { return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
+// แป้นพิมพ์ไทย (เกษมณี) -> ตัวอักษรที่เครื่องสแกนตั้งใจส่ง (ต้องตรงกับ THAI_KEYS ใน Code.gs)
 const THAI_KEYS = {
   'ๅ': '1', '/': '2', '-': '3', 'ภ': '4', 'ถ': '5', 'ุ': '6', 'ึ': '7', 'ค': '8', 'ต': '9', 'จ': '0', 'ข': '-', 'ฝ': '/',
   '๐': 'Q', '"': 'W', 'ฎ': 'E', 'ฑ': 'R', 'ธ': 'T', 'ํ': 'Y', '๊': 'U', 'ณ': 'I', 'ฯ': 'O', 'ญ': 'P',
@@ -1638,33 +261,636 @@ const THAI_KEYS = {
   'ฟ': 'A', 'ห': 'S', 'ก': 'D', 'ด': 'F', 'เ': 'G', '้': 'H', '่': 'J', 'า': 'K', 'ส': 'L',
   'ผ': 'Z', 'ป': 'X', 'แ': 'C', 'อ': 'V', 'ิ': 'B', 'ื': 'N', 'ท': 'M',
 };
-
-/**
- * ทำเลขที่สแกนให้เป็นรูปแบบเดียวกัน
- * - สแกนตอนแป้นพิมพ์เป็นภาษาไทย: แปลงกลับเป็นอักษรอังกฤษ
- * - QR ใบขาย Ecount "E040206/20261031/6" เก็บเป็น "EC-20261031-6"
- * (ต้องตรงกับ normCode ในหน้า station และ dispatch)
- */
-function normCode_(v) {
+// สแกนตอนแป้นพิมพ์เป็นภาษาไทยให้แปลงกลับ และ QR ใบขาย Ecount "E040206/20261031/6" เก็บเป็น "EC-20261031-6"
+// (ต้องตรงกับ normCode_ ใน Code.gs)
+function normCode(v) {
   let s = String(v || '').replace(/\s+/g, '');
   if (/[฀-๿]/.test(s)) s = s.split('').map(function (c) { return THAI_KEYS[c] || c; }).join('');
   s = s.toUpperCase();
   const m = s.match(/^E040206\/(\d{8})\/(\d+)$/);
   return m ? 'EC-' + m[1] + '-' + m[2] : s;
 }
+function mmss(ms) { const s = Math.floor(ms / 1000); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function nameOf(list, id) { const x = (list || []).find(function (i) { return i.id === id; }); return x ? x.name : ''; }
 
-function normEmail_(v) {
-  return String(v || '').trim().toLowerCase();
+async function api(action, params) {
+  if (!state.apiUrl) throw new Error('ยังไม่ได้ตั้ง URL ของ Apps Script');
+  const body = Object.assign({ action: action, token: state.token }, params || {});
+  const res = await fetch(state.apiUrl, { method: 'POST', body: JSON.stringify(body) });
+  if (!res.ok) throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ (' + res.status + ')');
+  const j = await res.json();
+  if (!j.ok) {
+    const e = new Error(j.error);
+    e.code = j.code;
+    if (j.code === 'AUTH') { state.token = ''; LS.del('token'); setTimeout(gotoLogin, 0); }
+    throw e;
+  }
+  return j.data;
 }
 
-function isTrue_(v) {
-  return v === true || String(v).toUpperCase() === 'TRUE';
+function blobToB64(blob) {
+  return new Promise(function (resolve, reject) {
+    const r = new FileReader();
+    r.onload = function () { resolve(String(r.result).split(',')[1] || ''); };
+    r.onerror = function () { reject(r.error); };
+    r.readAsDataURL(blob);
+  });
 }
 
-function fmt_(d, pattern) {
-  if (!d) return '';
-  const date = d instanceof Date ? d : new Date(d);
-  if (isNaN(date)) return String(d);
-  return Utilities.formatDate(date, CONFIG.TZ, pattern || 'dd/MM/yyyy HH:mm');
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); ta.remove();
+  }
+  toast('คัดลอกลิงก์แล้ว');
 }
 
+// ------------------------------------------------------------------ login
+function gotoLogin() {
+  stopCamera();
+  view('vLogin');
+  show('apiBox', !state.apiUrl);
+  $('inApi').value = state.apiUrl;
+  $('inEmail').value = LS.get('lastEmail', '');
+  show('otpBox', false);
+  $('loginErr').textContent = '';
+}
+
+$('btnOtp').onclick = async function () {
+  $('loginErr').textContent = '';
+  const url = $('inApi').value.trim();
+  if (url) { state.apiUrl = url; LS.set('apiUrl', url); }
+  const email = $('inEmail').value.trim().toLowerCase();
+  if (!email) { $('loginErr').textContent = 'กรุณาใส่อีเมล'; return; }
+  this.disabled = true;
+  try {
+    await api('requestOtp', { email: email });
+    LS.set('lastEmail', email);
+    show('otpBox', true);
+    $('inOtp').focus();
+    toast('ถ้าอีเมลนี้มีสิทธิ์ใช้งาน จะได้รับรหัสภายใน 1 นาที (ตรวจโฟลเดอร์ Spam ด้วย)', 8000);
+  } catch (e) { $('loginErr').textContent = e.message; }
+  this.disabled = false;
+};
+
+$('btnVerify').onclick = async function () {
+  $('loginErr').textContent = '';
+  this.disabled = true;
+  try {
+    const r = await api('verifyOtp', { email: $('inEmail').value.trim().toLowerCase(), code: $('inOtp').value.trim() });
+    state.token = r.token;
+    LS.set('token', r.token);
+    await afterLogin();
+  } catch (e) { $('loginErr').textContent = e.message; }
+  this.disabled = false;
+};
+$('inOtp').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('btnVerify').click(); });
+
+$('btnLogout').onclick = async function () {
+  if (state.rec) { toast('กรุณาหยุดอัดก่อน'); return; }
+  try { await api('logout'); } catch (e) {}
+  state.token = ''; LS.del('token');
+  gotoLogin();
+};
+
+async function afterLogin() {
+  state.boot = await api('bootstrap');
+  $('hdrUser').textContent = state.boot.user.name + ' (' + state.boot.user.role + ')';
+  if (['Admin', 'Editor'].indexOf(state.boot.user.role) < 0) {
+    view('vLogin');
+    $('loginErr').textContent = 'สิทธิ์ ' + state.boot.user.role + ' ใช้สถานีแพคไม่ได้';
+    return;
+  }
+  const s = state.setup;
+  const valid = s && state.boot.branches.some(function (b) { return b.id === s.branchId && b.companyId === s.companyId; });
+  if (valid) await enterStation(); else await gotoSetup();
+  pumpQueue();
+}
+
+// ------------------------------------------------------------------ setup
+async function gotoSetup() {
+  if (state.rec) { toast('กรุณาหยุดอัดก่อน'); return; }
+  view('vSetup');
+  $('setupErr').textContent = '';
+  const b = state.boot, s = state.setup || {};
+  $('selCompany').innerHTML = b.companies.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>'; }).join('');
+  if (s.companyId) $('selCompany').value = s.companyId;
+  fillBranches();
+  if (s.branchId) $('selBranch').value = s.branchId;
+  fillStations();
+  if (s.stationId) $('selStation').value = s.stationId;
+  $('selRes').value = String(s.resolution || 720);
+  try {
+    const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    tmp.getTracks().forEach(function (t) { t.stop(); });
+    const cams = (await navigator.mediaDevices.enumerateDevices()).filter(function (d) { return d.kind === 'videoinput'; });
+    $('selCam').innerHTML = cams.map(function (c, i) { return '<option value="' + esc(c.deviceId) + '">' + esc(c.label || ('กล้อง ' + (i + 1))) + '</option>'; }).join('');
+    if (s.cameraId && cams.some(function (c) { return c.deviceId === s.cameraId; })) $('selCam').value = s.cameraId;
+  } catch (e) {
+    $('setupErr').textContent = 'เปิดกล้องไม่ได้: ' + e.message;
+  }
+}
+function fillBranches() {
+  const cid = $('selCompany').value;
+  $('selBranch').innerHTML = state.boot.branches.filter(function (x) { return x.companyId === cid; })
+    .map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name) + '</option>'; }).join('');
+  fillStations();
+}
+function fillStations() {
+  const bid = $('selBranch').value;
+  const st = state.boot.stations.filter(function (x) { return x.branchId === bid; });
+  $('selStation').innerHTML = '<option value="">(ไม่ระบุ)</option>' +
+    st.map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name) + '</option>'; }).join('');
+}
+$('selCompany').onchange = fillBranches;
+$('selBranch').onchange = fillStations;
+$('selStation').onchange = function () {
+  const st = state.boot.stations.find(function (x) { return x.id === $('selStation').value; });
+  if (st && st.resolution) $('selRes').value = st.resolution;
+};
+$('btnSetup').onclick = gotoSetup;
+
+$('btnStart').onclick = async function () {
+  if (!$('selBranch').value) { $('setupErr').textContent = 'กรุณาเลือกสาขา'; return; }
+  state.setup = {
+    companyId: $('selCompany').value,
+    branchId: $('selBranch').value,
+    stationId: $('selStation').value,
+    resolution: Number($('selRes').value),
+    cameraId: $('selCam').value,
+  };
+  LS.set('setup', state.setup);
+  await enterStation();
+};
+
+// ------------------------------------------------------------------ camera
+async function startCamera() {
+  stopCamera();
+  const s = state.setup;
+  const wh = SIZE[s.resolution] || SIZE[720];
+  state.stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: {
+      deviceId: s.cameraId ? { exact: s.cameraId } : undefined,
+      width: { ideal: wh[0] }, height: { ideal: wh[1] }, frameRate: { ideal: FPS },
+    },
+  });
+  video.srcObject = state.stream;
+  await video.play();
+  cv.width = video.videoWidth || wh[0];
+  cv.height = video.videoHeight || wh[1];
+}
+function stopCamera() {
+  if (state.stream) state.stream.getTracks().forEach(function (t) { t.stop(); });
+  state.stream = null;
+}
+
+async function enterStation() {
+  view('vStation');
+  const b = state.boot, s = state.setup;
+  $('hdrCtx').textContent = [nameOf(b.companies, s.companyId), nameOf(b.branches, s.branchId), nameOf(b.stations, s.stationId), s.resolution + 'p'].filter(Boolean).join(' · ');
+  renderRecent();
+  try {
+    await startCamera();
+  } catch (e) {
+    toast('เปิดกล้องไม่ได้: ' + e.message, 8000);
+  }
+  focusScan();
+}
+
+// วาดภาพจากกล้องลง canvas พร้อมข้อความ (เลข track เวลา ผู้แพค) แล้วอัดจาก canvas
+function draw() {
+  const rec = state.rec;
+  if (rec && video.readyState >= 2) {
+    const W = cv.width, H = cv.height;
+    ctx.drawImage(video, 0, 0, W, H);
+    const fs = Math.round(H / 24);
+    const lines = [
+      rec.code + (rec.platformId ? '  [' + nameOf(state.boot.platforms, rec.platformId) + ']' : '') +
+        (rec.carrierId ? ' ' + nameOf(state.boot.carriers, rec.carrierId) : ''),
+      new Date().toLocaleString('th-TH', { hour12: false }),
+      state.boot.user.name + (state.setup.stationId ? ' · ' + nameOf(state.boot.stations, state.setup.stationId) : ''),
+    ];
+    ctx.font = 'bold ' + fs + 'px Arial, sans-serif';
+    const w = Math.max.apply(null, lines.map(function (l) { return ctx.measureText(l).width; })) + fs;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, w, fs * 1.35 * lines.length + fs * 0.5);
+    ctx.fillStyle = '#fff';
+    lines.forEach(function (l, i) { ctx.fillText(l, fs * 0.5, fs * 1.2 + i * fs * 1.35); });
+    $('recBadge').textContent = 'REC ' + mmss(Date.now() - rec.start.getTime());
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+function pickMime() {
+  const c = ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm'];
+  return c.find(function (m) { return window.MediaRecorder && MediaRecorder.isTypeSupported(m); }) || '';
+}
+
+// ------------------------------------------------------------------ recording
+function startRecording(code) {
+  const mime = pickMime();
+  const mr = new MediaRecorder(cv.captureStream(FPS), { mimeType: mime, videoBitsPerSecond: BITRATE[state.setup.resolution] || BITRATE[720] });
+  const rec = {
+    clientId: uid(), code: code, start: new Date(), chunks: [], mr: mr, mime: mime,
+    platformId: null, suggestedId: null, parentTracking: '', customerName: '', existing: null, cancelled: false,
+  };
+  mr.ondataavailable = function (e) { if (e.data && e.data.size) rec.chunks.push(e.data); };
+  mr.start(1000);
+  rec.timer = setTimeout(function () { if (state.rec === rec) stopRecording('timeout').then(function () { toast('ตัดการอัดอัตโนมัติ (เกิน 10 นาที)', 6000); }); }, MAX_MS);
+  state.rec = rec;
+  $('recCode').textContent = code;
+  show('recBadge', true); show('recCode', true);
+  $('btnStop').disabled = false; $('btnCancel').disabled = false;
+  return rec;
+}
+
+function stopRecording(reason) {
+  return new Promise(function (resolve) {
+    const rec = state.rec;
+    if (!rec) return resolve();
+    finalizePlatform(rec);
+    state.rec = null;
+    clearTimeout(rec.timer);
+    show('recBadge', false); show('recCode', false); show('platBox', false); show('invalidBox', false); show('repeatBox', false);
+    $('btnStop').disabled = true; $('btnCancel').disabled = true;
+    rec.mr.onstop = async function () {
+      rec.end = new Date();
+      if (!rec.cancelled) {
+        try { await enqueue(rec, reason); } catch (e) { toast('บันทึกวิดีโอลงคิวไม่สำเร็จ: ' + e.message, 8000); }
+      }
+      resolve();
+    };
+    rec.mr.stop();
+    focusScan();
+  });
+}
+
+$('btnStop').onclick = function () { stopRecording('button'); };
+$('btnCancel').onclick = function () {
+  if (!state.rec || !confirm('ยกเลิกและทิ้งวิดีโอนี้?')) return;
+  state.rec.cancelled = true;
+  stopRecording('cancel');
+  toast('ยกเลิกการอัดแล้ว');
+};
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && state.rec) stopRecording('button'); });
+
+// ------------------------------------------------------------------ scan
+function focusScan() {
+  setTimeout(function () {
+    const a = document.activeElement;
+    if (a !== $('inParent') && a !== $('inCustomer')) $('scan').focus();
+  }, 0);
+}
+$('scan').addEventListener('blur', function () {
+  setTimeout(function () {
+    const a = document.activeElement;
+    if (!$('vStation').classList.contains('hidden') && (!a || ['INPUT', 'SELECT', 'TEXTAREA'].indexOf(a.tagName) < 0)) $('scan').focus();
+  }, 150);
+});
+$('scan').addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const v = this.value;
+  this.value = '';
+  handleScan(v);
+});
+
+function matchRule(code) {
+  const rules = state.boot.rules || [];
+  for (let i = 0; i < rules.length; i++) {
+    try { if (new RegExp(rules[i].pattern).test(code)) return rules[i]; } catch (e) {}
+  }
+  return null;
+}
+
+async function handleScan(raw) {
+  const code = normCode(raw);
+  if (!code) { if (!$('platBox').classList.contains('hidden')) confirmPlatform(); return; }
+  if (STOP_CODES.indexOf(code) >= 0) { await stopRecording('button'); return; }
+  if (state.rec && state.rec.code === code) { toast('กำลังอัดเลขนี้อยู่แล้ว'); return; }
+  if (!state.stream) { toast('กล้องยังไม่พร้อม ตรวจสอบการเชื่อมต่อกล้อง', 6000); return; }
+  if (state.rec) await stopRecording('next_scan');
+
+  const rec = startRecording(code);
+  // เก็บภาพจากกล้องตอนสแกน (ใบปะหน้ามักอยู่ในกล้องตอนนี้) ไว้อ่านชื่อลูกค้า
+  const shot = snapshotB64();
+  const rule = matchRule(code);
+  if (rule) {
+    openPlatform(rec, rule.suggestPlatformId, rule.carrierId);
+  } else {
+    show('invalidBox', true);
+  }
+
+  try {
+    const chk = await api('checkTracking', { code: code });
+    if (state.rec !== rec) return;
+    // packCount 0 = เคยมีแต่คลิปถูกลบหมด ให้ถือเป็นเลขใหม่: คงหน้าต่างที่เปิดตามกฎบาร์โค้ดไว้
+    // (ไม่เปลี่ยนค่าที่เลือกอยู่ เพราะค่าเดิมอาจเป็นค่าที่ผิดจนต้องลบคลิป)
+    if (!(chk.existing && chk.existing.customerName)) readNameFromShot(rec, shot);
+    if (chk.existing && chk.existing.packCount === 0) {
+      if (!rule) {
+        show('invalidBox', false);
+        openPlatform(rec, chk.existing.platformId, chk.existing.carrierId);
+      }
+    } else if (chk.existing) {
+      rec.existing = chk.existing;
+      rec.platformId = chk.existing.platformId;
+      show('platBox', false); show('invalidBox', false);
+      const s = state.setup, x = chk.existing;
+      let msg = '<b>เลขนี้เคยแพคแล้ว ' + x.packCount + ' ครั้ง</b> (สถานะล่าสุด: ' + esc(x.statusName) + ')<br>ระบบจะเก็บวิดีโอเพิ่ม และเก็บของเดิมไว้';
+      if (x.companyId !== s.companyId || x.branchId !== s.branchId) {
+        msg += '<br><b>⚠ เลขนี้บันทึกไว้ที่บริษัท/สาขาอื่น</b> (' + esc(nameOf(state.boot.companies, x.companyId) || x.companyId) + ' · ' + esc(nameOf(state.boot.branches, x.branchId) || x.branchId) + ')';
+      }
+      $('repeatBox').innerHTML = msg;
+      show('repeatBox', true);
+    }
+  } catch (e) {
+    if (e.code !== 'AUTH') toast('ตรวจสอบเลขซ้ำไม่ได้: ' + e.message, 6000);
+  }
+}
+
+$('btnKeep').onclick = function () {
+  show('invalidBox', false);
+  if (state.rec) openPlatform(state.rec, 'OTHER', '');
+};
+$('btnDiscard').onclick = function () {
+  if (!state.rec) return;
+  state.rec.cancelled = true;
+  stopRecording('cancel');
+  toast('ยกเลิกการอัดแล้ว');
+};
+
+// ------------------------------------------------------------------ platform popup
+let platSel = null;
+let carSel = null;
+// เปิดหน้าต่างให้ยืนยันแพลตฟอร์มและการจัดส่ง โดยเลือกค่าที่ระบบแนะนำไว้ก่อน
+function openPlatform(rec, suggestedId, suggestedCarrierId) {
+  rec.suggestedId = suggestedId || 'OTHER';
+  rec.suggestedCarrierId = suggestedCarrierId || '';
+  platSel = rec.suggestedId;
+  carSel = rec.suggestedCarrierId;
+  $('inParent').value = '';
+  $('inCustomer').value = rec.customerName || '';
+  if (!rec.ocrBusy) $('ocrState').textContent = '';
+  renderPlats();
+  show('platBox', true);
+}
+function choiceButtons(list, sel) {
+  return list.map(function (p) {
+    return '<button tabindex="-1" data-id="' + esc(p.id) + '" class="' + (p.id === sel ? 'sel' : '') + '">' + esc(p.name) + '</button>';
+  }).join('');
+}
+function renderPlats() {
+  $('plats').innerHTML = choiceButtons(state.boot.platforms, platSel);
+  $('cars').innerHTML = choiceButtons(state.boot.carriers || [], carSel);
+}
+['plats', 'cars'].forEach(function (id) {
+  $(id).addEventListener('mousedown', function (e) { e.preventDefault(); });
+  $(id).addEventListener('click', function (e) {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (id === 'plats') platSel = b.getAttribute('data-id');
+    else carSel = b.getAttribute('data-id');
+    renderPlats();
+  });
+});
+function confirmPlatform() {
+  const rec = state.rec;
+  if (!rec) return;
+  rec.platformId = platSel || rec.suggestedId || 'OTHER';
+  rec.carrierId = carSel || rec.suggestedCarrierId || '';
+  rec.parentTracking = normCode($('inParent').value);
+  rec.customerName = $('inCustomer').value.trim();
+  rec.nameConfirmed = true;
+  show('platBox', false);
+  focusScan();
+}
+
+// ------------------------------------------------------------------ customer name from webcam (OCR)
+// ภาพจากกล้องจริง (ไม่มีข้อความซ้อน) ความละเอียดเต็มของกล้อง
+function snapshotB64() {
+  if (!state.stream || video.readyState < 2) return '';
+  const c = document.createElement('canvas');
+  c.width = video.videoWidth; c.height = video.videoHeight;
+  c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.85).split(',')[1] || '';
+}
+async function readNameFromShot(rec, b64) {
+  if (!b64) return;
+  rec.ocrBusy = true;
+  if (state.rec === rec) $('ocrState').textContent = '· กำลังอ่านชื่อจากกล้อง...';
+  let name = '';
+  try { name = (await api('ocrLabel', { data: b64 })).name; } catch (e) { name = ''; }
+  rec.ocrBusy = false;
+  if (state.rec !== rec) {
+    // หยุดอัดไปแล้ว ถ้ายังไม่ได้อัปโหลดให้ใส่ชื่อในคิว (ใช้เฉพาะเมื่อยังไม่มีชื่อ)
+    if (name && !rec.customerName) rec.customerName = name;
+    return;
+  }
+  const popupOpen = !$('platBox').classList.contains('hidden');
+  if (popupOpen && !$('inCustomer').value.trim()) $('inCustomer').value = name;
+  if (!popupOpen && !rec.customerName) rec.customerName = name;
+  $('ocrState').textContent = name ? '· อ่านจากกล้อง ตรวจก่อนยืนยัน' : '· อ่านชื่อไม่ได้ พิมพ์เองได้';
+}
+$('btnOcr').addEventListener('mousedown', function (e) { e.preventDefault(); });
+$('btnOcr').onclick = function () {
+  if (!state.rec) return;
+  $('inCustomer').value = '';
+  readNameFromShot(state.rec, snapshotB64());
+};
+$('inCustomer').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); confirmPlatform(); } });
+function finalizePlatform(rec) {
+  if (rec.existing) return;
+  if (!$('platBox').classList.contains('hidden')) confirmPlatform();
+  if (!rec.platformId) rec.platformId = rec.suggestedId || 'OTHER';
+  if (!rec.carrierId) rec.carrierId = rec.suggestedCarrierId || '';
+}
+$('btnPlatOk').onclick = confirmPlatform;
+$('inParent').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); confirmPlatform(); } });
+
+// ------------------------------------------------------------------ upload queue
+async function enqueue(rec, reason) {
+  const blob = new Blob(rec.chunks, { type: 'video/webm' });
+  if (!blob.size) throw new Error('ไม่มีข้อมูลวิดีโอ');
+  const s = state.setup;
+  const meta = {
+    clientId: rec.clientId, code: rec.code, platformId: rec.platformId, carrierId: rec.carrierId || '', parentTracking: rec.parentTracking,
+    customerName: rec.customerName || '',
+    companyId: s.companyId, branchId: s.branchId, stationId: s.stationId, resolution: s.resolution,
+    startTime: rec.start.toISOString(), endTime: rec.end.toISOString(),
+    durationSec: Math.round((rec.end - rec.start) / 1000), stopReason: reason,
+    mimeType: 'video/webm', size: blob.size,
+  };
+  await Q.put({ id: rec.clientId, blob: blob, meta: meta, tries: 0 });
+  setRecent(meta.clientId, { code: meta.code, at: meta.startTime, sec: meta.durationSec, status: 'wait', label: 'รออัปโหลด' });
+  pumpQueue();
+}
+
+async function uploadItem(item) {
+  const blob = item.blob;
+  const b = await api('beginPack', { meta: item.meta });
+  if (b.done) return b;
+  let offset = b.offset || 0;
+  while (offset < blob.size) {
+    const end = Math.min(offset + CHUNK, blob.size);
+    const data = await blobToB64(blob.slice(offset, end));
+    const r = await api('uploadChunk', { sessionId: b.sessionId, offset: offset, total: blob.size, data: data });
+    if (r.done) return Object.assign({ isRepeat: b.isRepeat }, r);
+    offset = r.next;
+    setRecent(item.id, { status: 'up', label: 'อัปโหลด ' + Math.round(offset / blob.size * 100) + '%' });
+  }
+  throw new Error('อัปโหลดไม่ครบ');
+}
+
+async function pumpQueue() {
+  if (state.pumping || !state.token) { state.pumpAgain = true; return; }
+  state.pumping = true;
+  state.pumpAgain = false;
+  let failed = false;
+  try {
+    let items = await Q.all();
+    items.sort(function (a, b) { return a.meta.startTime < b.meta.startTime ? -1 : 1; });
+    updateQueueInfo(items.length);
+    for (const item of items) {
+      setRecent(item.id, { code: item.meta.code, at: item.meta.startTime, sec: item.meta.durationSec, status: 'up', label: 'กำลังอัปโหลด' });
+      try {
+        const r = await uploadItem(item);
+        await Q.del(item.id);
+        setRecent(item.id, { status: 'done', label: 'เสร็จ', publicUrl: r.publicUrl, sessionId: r.sessionId, endAt: item.meta.endTime, by: state.boot.user.email });
+        if (r.warning) toast(r.warning, 8000);
+      } catch (e) {
+        item.tries = (item.tries || 0) + 1;
+        await Q.put(item);
+        setRecent(item.id, { status: 'err', label: 'ล้มเหลว จะลองใหม่ (' + e.message + ')' });
+        failed = true;
+        if (e.code !== 'AUTH') setTimeout(pumpQueue, 30000);
+        break;
+      }
+      updateQueueInfo((await Q.all()).length);
+    }
+  } finally {
+    state.pumping = false;
+  }
+  // มีวิดีโอใหม่เข้าคิวระหว่างที่กำลังอัปโหลดอยู่
+  if (!failed && state.pumpAgain) pumpQueue();
+}
+
+function updateQueueInfo(n) {
+  $('queueInfo').textContent = n ? '· รออัปโหลด ' + n + ' ไฟล์' : '';
+  $('hdrQueue').textContent = n ? 'คิวอัปโหลด ' + n : '';
+}
+
+// ------------------------------------------------------------------ recent list
+function setRecent(id, patch) {
+  let r = state.recent.find(function (x) { return x.id === id; });
+  if (!r) { r = { id: id }; state.recent.unshift(r); }
+  Object.assign(r, patch);
+  state.recent = state.recent.slice(0, 30);
+  LS.set('recent', state.recent);
+  renderRecent();
+}
+function renderRecent() {
+  $('recent').innerHTML = state.recent.map(function (r) {
+    const t = r.at ? new Date(r.at).toLocaleTimeString('th-TH', { hour12: false }) : '';
+    return '<div class="item"><div class="t"><b>' + esc(r.code) + '</b><div class="muted">' + esc(t) + (r.sec != null ? ' · ' + mmss(r.sec * 1000) : '') + '</div></div>' +
+      '<span class="pill ' + esc(r.status) + '" title="' + esc(r.label) + '">' + esc(String(r.label || '').slice(0, 24)) + '</span>' +
+      (r.publicUrl ? '<button tabindex="-1" data-url="' + esc(r.publicUrl) + '">คัดลอกลิงก์</button>' : '') +
+      (canDelete(r) ? '<button tabindex="-1" class="del" data-del="' + esc(r.id) + '">ลบ</button>' : '') + '</div>';
+  }).join('') || '<div class="muted">ยังไม่มีรายการ</div>';
+}
+
+// เซิร์ฟเวอร์ตรวจสิทธิ์บริษัท/สาขาอีกชั้นตอนกดลบ
+function canDelete(r) {
+  return r.status === 'done' && !!r.sessionId;
+}
+
+// ค้นหาคลิปเก่าจากเลข track (รายการล่าสุดเก็บแค่ในเครื่องนี้ 30 รายการ)
+let clipSearch = '';
+async function findClips(code) {
+  clipSearch = normCode(code);
+  if (!clipSearch) return;
+  $('clipList').innerHTML = '<div class="muted">กำลังค้นหา...</div>';
+  try {
+    const r = await api('listClips', { code: clipSearch });
+    $('clipList').innerHTML = r.clips.map(function (c) {
+      return '<div class="item"><div class="t"><b>' + esc(c.at) + '</b><div class="muted">' + mmss(c.sec * 1000) + ' · ' + esc(c.packer) + '</div></div>' +
+        '<a href="' + esc(c.videoUrl) + '" target="_blank" rel="noopener">ดูวิดีโอ</a>' +
+        '<button tabindex="-1" class="del" data-sid="' + esc(c.sessionId) + '">ลบ</button></div>';
+    }).join('') || '<div class="muted" style="margin-top:8px">' + (r.found ? 'เลขนี้ไม่มีคลิปเหลืออยู่' : 'ไม่พบเลขนี้ในระบบ') + '</div>';
+  } catch (e) {
+    $('clipList').innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+  }
+}
+$('btnClipFind').onclick = function () { findClips($('clipCode').value).then(focusScan); };
+$('clipCode').addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  findClips(this.value).then(focusScan);
+});
+$('clipList').addEventListener('click', async function (e) {
+  const b = e.target.closest('button[data-sid]');
+  if (!b || !confirm('ลบวิดีโอ ' + clipSearch + ' ?\nไฟล์จะถูกลบออกจาก Drive และลูกค้าจะดูวิดีโอนี้ไม่ได้')) return;
+  const sid = b.getAttribute('data-sid');
+  b.disabled = true;
+  try {
+    await api('deleteVideo', { sessionId: sid });
+    const r = state.recent.find(function (x) { return x.sessionId === sid; });
+    if (r) setRecent(r.id, { status: 'del', label: 'ลบแล้ว' });
+    toast('ลบวิดีโอแล้ว');
+    await findClips(clipSearch);
+  } catch (err) {
+    toast('ลบไม่สำเร็จ: ' + err.message, 6000);
+    b.disabled = false;
+  }
+  focusScan();
+});
+
+// สลับไปหน้าจัดส่ง ใช้การเข้าสู่ระบบเดิม
+$('goDispatch').addEventListener('click', function (e) {
+  if (state.rec) { e.preventDefault(); toast('กรุณาหยุดอัดก่อนสลับหน้า'); return; }
+  if (state.pumping && !confirm('ยังอัปโหลดวิดีโอไม่เสร็จ คลิปจะอัปโหลดต่อเมื่อกลับมาหน้านี้\nสลับหน้าเลยไหม?')) { e.preventDefault(); return; }
+  state.leaving = true;
+});
+
+async function deleteRecent(id) {
+  const r = state.recent.find(function (x) { return x.id === id; });
+  if (!r || !confirm('ลบวิดีโอ ' + r.code + ' ?\nไฟล์จะถูกลบออกจาก Drive และลูกค้าจะดูวิดีโอนี้ไม่ได้')) return;
+  try {
+    await api('deleteVideo', { sessionId: r.sessionId });
+    setRecent(id, { status: 'del', label: 'ลบแล้ว' });
+    toast('ลบวิดีโอแล้ว');
+  } catch (e) {
+    toast('ลบไม่สำเร็จ: ' + e.message, 6000);
+  }
+}
+$('recent').addEventListener('mousedown', function (e) { if (e.target.closest('button')) e.preventDefault(); });
+$('recent').addEventListener('click', function (e) {
+  const b = e.target.closest('button[data-url]');
+  if (b) copyText(b.getAttribute('data-url'));
+  const d = e.target.closest('button[data-del]');
+  if (d) deleteRecent(d.getAttribute('data-del')).then(focusScan);
+});
+
+window.addEventListener('beforeunload', function (e) {
+  if (!state.leaving && (state.rec || state.pumping)) { e.preventDefault(); e.returnValue = ''; }
+});
+window.addEventListener('online', function () { pumpQueue(); });
+
+// ------------------------------------------------------------------ start
+(async function init() {
+  if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
+    document.body.innerHTML = '<div class="center card">เบราว์เซอร์นี้อัดวิดีโอไม่ได้ กรุณาใช้ Google Chrome</div>';
+    return;
+  }
+  if (!state.token) return gotoLogin();
+  try { await afterLogin(); }
+  catch (e) { if (e.code !== 'AUTH') { gotoLogin(); $('loginErr').textContent = e.message; } }
+})();
+</script>
+</body>
+</html>
